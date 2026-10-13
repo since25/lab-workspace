@@ -20,7 +20,7 @@ const fmtSize = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` 
 export default function SangerPage() {
   const [job, setJob] = useState("");
   const [rows, setRows] = useState<FileRow[]>([]);
-  const [p, setP] = useState({ sequence: "", target_position: "", target_base: "A", edited_base: "G", ref_sequence: "", preset: "", pattern: "", replacement: "", tag: "" });
+  const [p, setP] = useState({ sequence: "", target_position: "", bystander_position: "", target_base: "A", edited_base: "G", ref_sequence: "", preset: "", pattern: "", replacement: "", tag: "" });
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -95,6 +95,8 @@ export default function SangerPage() {
         job,
         sequence: p.sequence,
         target_position: Number(p.target_position),
+        bystander_position: p.bystander_position,
+        files: stored,
         target_base: p.target_base,
         edited_base: p.edited_base,
         ref_sequence: p.ref_sequence,
@@ -178,6 +180,7 @@ export default function SangerPage() {
                 ...p,
                 sequence: g.sequence,
                 target_position: g.target_position ? String(g.target_position) : p.target_position,
+                bystander_position: g.bystander_position ? String(g.bystander_position) : p.bystander_position,
                 target_base: g.target_base || p.target_base,
                 edited_base: g.edited_base || p.edited_base,
               })
@@ -198,6 +201,10 @@ export default function SangerPage() {
           <label className="field">
             编辑后碱基
             <Combobox value={p.edited_base} options={BASES} onChange={(v) => setP({ ...p, edited_base: v })} />
+          </label>
+          <label className="field">
+            旁观位（可选）
+            <input type="number" min={1} value={p.bystander_position} onChange={set("bystander_position")} />
           </label>
           <label className="field wide">
             参考序列片段（可选，用于换算到参考坐标）

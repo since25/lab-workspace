@@ -24,7 +24,7 @@
 上传的文件只存在于分析服务的临时工作区，数据库 `analysis_jobs` 只记录任务归属与状态；每个接口都校验任务属于当前用户。
 
 - `POST /analysis/sanger/upload?filename=&job=`：请求体为单个 `.ab1`（或含 `.ab1` 的 `.zip`）二进制；不带 `job` 时新建任务，返回 `{job, files}`
-- `POST /analysis/sanger/analyze`：`{job, sequence, target_position, target_base, edited_base, ref_sequence?, rename_config?}`；进入全站队列，立即返回 `202` 与排队状态
+- `POST /analysis/sanger/analyze`：`{job, sequence, target_position, target_base, edited_base, bystander_position?, files?, ref_sequence?, rename_config?}`；进入全站队列，立即返回 `202` 与排队状态。`bystander_position` 须在 guide 内、不等于目标位且与目标碱基同一种碱基；填写时网页把它展开到 `files`（已上传的服务器文件名）每一个上，作为分析服务的逐文件 `guide_overrides` 送出，结果多「Bystander_Position」「Bystander_Position_Edit_Rate」两列
 - `POST /analysis/nanopore/upload?filename=`：请求体为厂商交付包 `.zip`，只解出 Sequences / Bam(`*.bam`) / Frequency_tables / Suspious_sites，返回 `{job, samples}`；分析结果 summary 末尾多 `Data_Source`（BAM / 频率表）与 `Data_Note`（频率表截断、空文件、与 BAM 不符等数据瑕疵）两列
 - `POST /analysis/nanopore/analyze`：`{job, rows:[{file, guide, target_position, target_base, edited_base, bystander_position?}]}`；同样入队返回 `202`
 - `GET /analysis/jobs/:id`：排队/运行状态 `{status: queued|running|done|failed|lost, position, wait_seconds, elapsed_seconds, estimate_seconds, remaining_seconds, queue_length, result?, error?}`

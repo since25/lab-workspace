@@ -15,6 +15,14 @@ export interface GuideInput {
 
 const IUPAC = /^[ACGTRYSWKMBDHVN]+$/;
 
+// 旁观位须与目标位同一种碱基：分析只在 guide 上等于目标碱基的位点计算编辑率，
+// 指到别的碱基不会报错，只会让旁观位两列静默为空。base 为空时无从比较，不拦。
+export function bystanderBaseError(sequence: string, bystander: number, base: string): string | null {
+  if (!base) return null;
+  const got = sequence[bystander - 1];
+  return got === base ? null : `旁观位第 ${bystander} 位是 ${got}，与目标碱基 ${base} 不同；旁观位必须与目标位是同一种碱基`;
+}
+
 // 校验并规范化 Guide：序列统一大写、去空白，只允许 IUPAC 字符
 export function parseGuide(body: Record<string, unknown>): GuideInput {
   const name = str(body.name);
@@ -47,6 +55,12 @@ export function parseGuide(body: Record<string, unknown>): GuideInput {
   const edited_base = str(body.edited_base).toUpperCase();
   for (const b of [target_base, edited_base]) {
     if (b && !/^[ACGT]$/.test(b)) throw new HttpError(400, "碱基只能是 A/C/G/T");
+  }
+  if (bystander_position !== null) {
+    // 没填目标碱基时，以目标位置上的碱基为准
+    const base = target_base || (target_position !== null ? sequence[target_position - 1] : "");
+    const err = bystanderBaseError(sequence, bystander_position, base);
+    if (err) throw new HttpError(400, err);
   }
   return { name, target: str(body.target), sequence, pam, strand, target_position, bystander_position, target_base, edited_base, notes: str(body.notes) };
 }
