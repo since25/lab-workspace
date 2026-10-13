@@ -1,0 +1,3 @@
+cell_name,cell_type,source,passage,concentration,volume,location,freeze_date,status,remarks
+CELL-EXAMPLE-001,K562,source-A,18,2e6 cells/mL,1.0 mL,Freezer-A/Rack-01/Box-01,2026-01-15,available,脱敏示例
+CELL-EXAMPLE-002,HEK293T,source-B,12,1e6 cells/mL,1.5 mL,Freezer-B/Rack-02/Box-03,2026-02-20,used,脱敏示例
