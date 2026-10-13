@@ -7,6 +7,7 @@ export interface GuideInput {
   pam: string;
   strand: string;
   target_position: number | null;
+  bystander_position: number | null;
   target_base: string;
   edited_base: string;
   notes: string;
@@ -33,10 +34,19 @@ export function parseGuide(body: Record<string, unknown>): GuideInput {
       throw new HttpError(400, "目标位置必须是序列范围内的整数");
     }
   }
+  const bp = str(body.bystander_position);
+  let bystander_position: number | null = null;
+  if (bp) {
+    bystander_position = Number(bp);
+    if (!Number.isInteger(bystander_position) || bystander_position < 1 || bystander_position > sequence.length) {
+      throw new HttpError(400, "旁观位必须是序列范围内的整数");
+    }
+    if (bystander_position === target_position) throw new HttpError(400, "旁观位不能与目标位置相同");
+  }
   const target_base = str(body.target_base).toUpperCase();
   const edited_base = str(body.edited_base).toUpperCase();
   for (const b of [target_base, edited_base]) {
     if (b && !/^[ACGT]$/.test(b)) throw new HttpError(400, "碱基只能是 A/C/G/T");
   }
-  return { name, target: str(body.target), sequence, pam, strand, target_position, target_base, edited_base, notes: str(body.notes) };
+  return { name, target: str(body.target), sequence, pam, strand, target_position, bystander_position, target_base, edited_base, notes: str(body.notes) };
 }

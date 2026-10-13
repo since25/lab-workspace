@@ -12,9 +12,9 @@
 
 ### guides
 
-`id`, `owner_id -> users.id`, `name`, `target`, `sequence`, `pam`, `strand`, `target_position`, `target_base`, `edited_base`, `notes`, `created_at`, `updated_at`
+`id`, `owner_id -> users.id`, `name`, `target`, `sequence`, `pam`, `strand`, `target_position`, `bystander_position`, `target_base`, `edited_base`, `notes`, `created_at`, `updated_at`
 
-`target_position` / `target_base` / `edited_base` 可选，分析页选 Guide 时用来回填参数。
+`target_position` / `bystander_position` / `target_base` / `edited_base` 可选，分析页选 Guide 时用来回填参数；`bystander_position`（旁观位，迁移 006 新增）目前只有纳米孔分析使用，须在序列范围内且不能与目标位置相同。导入导出模板在末尾多一列「旁观位」，旧模板没有这一列也能导入（视为未填）。
 
 约束：`owner_id + name` 唯一；序列统一大写并校验 IUPAC 字符；普通用户只能访问自己的记录。
 

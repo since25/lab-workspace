@@ -15,9 +15,9 @@ export const POST = handle(async (req: Request) => {
   const g = parseGuide(await readJson(req));
   try {
     const [row] = await query<{ id: number }>(
-      `INSERT INTO guides(owner_id, name, target, sequence, pam, strand, target_position, target_base, edited_base, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [user.id, g.name, g.target, g.sequence, g.pam, g.strand, g.target_position, g.target_base, g.edited_base, g.notes]
+      `INSERT INTO guides(owner_id, name, target, sequence, pam, strand, target_position, target_base, edited_base, notes, bystander_position)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [user.id, g.name, g.target, g.sequence, g.pam, g.strand, g.target_position, g.target_base, g.edited_base, g.notes, g.bystander_position]
     );
     await audit(user.id, "guide.create", "guide", row.id, {}, req);
     return ok({ guide: row }, 201);

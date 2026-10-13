@@ -12,9 +12,9 @@ export const PATCH = handle(async (req: Request, ctx: RouteContext<"/api/v1/guid
   try {
     const rows = await query(
       `UPDATE guides SET name=$3, target=$4, sequence=$5, pam=$6, strand=$7, target_position=$8,
-              target_base=$9, edited_base=$10, notes=$11, updated_at=now()
+              target_base=$9, edited_base=$10, notes=$11, bystander_position=$12, updated_at=now()
         WHERE id=$1 AND owner_id=$2 RETURNING *`,
-      [Number(id), user.id, g.name, g.target, g.sequence, g.pam, g.strand, g.target_position, g.target_base, g.edited_base, g.notes]
+      [Number(id), user.id, g.name, g.target, g.sequence, g.pam, g.strand, g.target_position, g.target_base, g.edited_base, g.notes, g.bystander_position]
     );
     if (!rows[0]) throw new HttpError(404, "Guide 不存在");
     await audit(user.id, "guide.update", "guide", id, {}, req);

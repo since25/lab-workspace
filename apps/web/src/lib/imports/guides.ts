@@ -4,8 +4,8 @@ import type { ImportIssue } from "./cells";
 import { type Cell, text } from "./sheet";
 
 // 与导出模板一致的列名
-export const GUIDE_HEADERS = ["名称", "靶点", "序列", "PAM", "链方向", "目标位置", "目标碱基", "编辑后碱基", "备注"];
-const KEYS = ["name", "target", "sequence", "pam", "strand", "target_position", "target_base", "edited_base", "notes"];
+export const GUIDE_HEADERS = ["名称", "靶点", "序列", "PAM", "链方向", "目标位置", "目标碱基", "编辑后碱基", "备注", "旁观位"];
+const KEYS = ["name", "target", "sequence", "pam", "strand", "target_position", "target_base", "edited_base", "notes", "bystander_position"];
 
 // 解析 Guide 导入文件：逐行用与单条新增相同的规则校验，不合格的行进入问题列表
 export function parseGuideSheet(sheet: { name: string; rows: Cell[][] }): { rows: GuideInput[]; issues: ImportIssue[]; fatal: string | null } {

@@ -6,7 +6,7 @@ import type { Guide } from "@/lib/types";
 import Combobox from "../Combobox";
 import ImportBox from "../ImportBox";
 
-const EMPTY = { name: "", target: "", sequence: "", pam: "", strand: "", target_position: "", target_base: "", edited_base: "", notes: "" };
+const EMPTY = { name: "", target: "", sequence: "", pam: "", strand: "", target_position: "", bystander_position: "", target_base: "", edited_base: "", notes: "" };
 
 export default function GuidesPage() {
   const [guides, setGuides] = useState<Guide[]>([]);
@@ -54,7 +54,7 @@ export default function GuidesPage() {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>名称</th><th>靶点</th><th>序列</th><th>PAM</th><th>链</th><th>目标位置</th><th>编辑</th><th>备注</th><th></th></tr>
+            <tr><th>名称</th><th>靶点</th><th>序列</th><th>PAM</th><th>链</th><th>目标位置</th><th>旁观位</th><th>编辑</th><th>备注</th><th></th></tr>
           </thead>
           <tbody>
             {guides.map((g) => (
@@ -65,6 +65,7 @@ export default function GuidesPage() {
                 <td className="mono">{g.pam}</td>
                 <td>{g.strand}</td>
                 <td className="num">{g.target_position ?? ""}</td>
+                <td className="num">{g.bystander_position ?? ""}</td>
                 <td>{g.target_base && g.edited_base ? `${g.target_base}→${g.edited_base}` : ""}</td>
                 <td>{g.notes}</td>
                 <td className="actions">
@@ -73,7 +74,7 @@ export default function GuidesPage() {
                 </td>
               </tr>
             ))}
-            {!guides.length && <tr><td colSpan={9} className="muted">还没有 Guide</td></tr>}
+            {!guides.length && <tr><td colSpan={10} className="muted">还没有 Guide</td></tr>}
           </tbody>
         </table>
       </div>
@@ -84,7 +85,13 @@ export default function GuidesPage() {
 
 function GuideDialog({ guide, onClose, onSaved }: { guide: Guide | null; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState(() =>
-    guide ? { ...guide, target_position: guide.target_position === null ? "" : String(guide.target_position) } : EMPTY
+    guide
+      ? {
+          ...guide,
+          target_position: guide.target_position === null ? "" : String(guide.target_position),
+          bystander_position: guide.bystander_position === null ? "" : String(guide.bystander_position),
+        }
+      : EMPTY
   );
   const [error, setError] = useState("");
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [k]: e.target.value });
@@ -114,6 +121,7 @@ function GuideDialog({ guide, onClose, onSaved }: { guide: Guide | null; onClose
             <Combobox value={form.strand} options={[{ value: "", label: "未填" }, "+", "-"]} onChange={(v) => setForm({ ...form, strand: v })} />
           </label>
           <label className="field">目标位置（guide 内第几位）<input type="number" min={1} value={form.target_position} onChange={set("target_position")} /></label>
+          <label className="field">旁观位（选填，guide 内第几位）<input type="number" min={1} value={form.bystander_position} onChange={set("bystander_position")} /></label>
           <label className="field">
             目标碱基
             <Combobox value={form.target_base} options={bases} onChange={(v) => setForm({ ...form, target_base: v })} />

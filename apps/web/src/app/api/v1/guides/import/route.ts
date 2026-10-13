@@ -26,12 +26,12 @@ export const POST = handle(async (req: Request) => {
   await withTransaction(async (c) => {
     for (const g of rows) {
       await c.query(
-        `INSERT INTO guides(owner_id, name, target, sequence, pam, strand, target_position, target_base, edited_base, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `INSERT INTO guides(owner_id, name, target, sequence, pam, strand, target_position, target_base, edited_base, notes, bystander_position)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (owner_id, name) DO UPDATE SET target=EXCLUDED.target, sequence=EXCLUDED.sequence, pam=EXCLUDED.pam,
            strand=EXCLUDED.strand, target_position=EXCLUDED.target_position, target_base=EXCLUDED.target_base,
-           edited_base=EXCLUDED.edited_base, notes=EXCLUDED.notes, updated_at=now()`,
-        [user.id, g.name, g.target, g.sequence, g.pam, g.strand, g.target_position, g.target_base, g.edited_base, g.notes]
+           edited_base=EXCLUDED.edited_base, notes=EXCLUDED.notes, bystander_position=EXCLUDED.bystander_position, updated_at=now()`,
+        [user.id, g.name, g.target, g.sequence, g.pam, g.strand, g.target_position, g.target_base, g.edited_base, g.notes, g.bystander_position]
       );
     }
     await audit(user.id, "guide.import", "guide", "", { filename: name, inserted: summary.new_rows, updated: updates, issues: issues.length }, req, c);

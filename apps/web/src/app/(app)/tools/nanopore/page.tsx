@@ -111,6 +111,7 @@ export default function NanoporePage() {
                 ...p,
                 guide: g.sequence,
                 target_position: g.target_position ? String(g.target_position) : p.target_position,
+                bystander_position: g.bystander_position ? String(g.bystander_position) : p.bystander_position,
                 target_base: g.target_base || p.target_base,
                 edited_base: g.edited_base || p.edited_base,
               })

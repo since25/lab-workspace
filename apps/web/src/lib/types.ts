@@ -6,6 +6,7 @@ export interface Guide {
   pam: string;
   strand: string;
   target_position: number | null;
+  bystander_position: number | null;
   target_base: string;
   edited_base: string;
   notes: string;
