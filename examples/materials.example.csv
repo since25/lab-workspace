@@ -1,0 +1,3 @@
+category,item_name,specification,catalog_no,unit,quantity,location,status,remarks
+消耗品,无菌离心管,15 mL,DEMO-001,包,12,Storage-A,active,脱敏示例
+试剂,缓冲液,通用规格,DEMO-002,瓶,6,Reagent-02,active,脱敏示例
