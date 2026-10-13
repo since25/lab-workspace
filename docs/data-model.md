@@ -52,18 +52,31 @@
 
 ### freezers / freezer_containers / freezer_samples（冰箱管理）
 
-结构为「冰箱 → 容器 → 样品」，样品只定位到容器，不记孔位。
+结构为「冰箱 → 容器 → 样品」，样品只定位到容器，不记孔位。界面上容器统称「盒子/框」。带架子的冰箱（-80℃）另有「冰箱层 → 架子 → 架内层 × 盒位」的布局（迁移 `008_freezer_racks.sql`）。
 
-- `freezers`：`id`, `name`（唯一）, `temperature`（`-80` / `-20` / `4`）, `location`, `remarks`, `is_active`, `created_at`, `updated_at`。仅管理员维护；停用后不能再新建容器，已有记录不受影响；有容器的冰箱不能删除。
-- `freezer_containers`：`id`, `owner_id -> users.id`, `freezer_id`, `kind`（`box` 盒子 / `basket` 框）, `name`, `shelf_no`（层，必填）, `rack_no`（架，选填）, `slot_no`（架内格位，选填）, `remarks`, `created_at`, `updated_at`。不设盒子规格；大箱子或框不填架号、格位。盒子在同一「冰箱/层/架/格」已有其他盒子时只提示，不阻止保存，提示不透露对方信息。只能删除没有在库样品的容器。
+- `freezers`：`id`, `name`（唯一）, `temperature`（`-80` / `-20` / `4`）, `location`, `remarks`, `is_active`, `shelf_count`（总层数，选填）, `racks_per_shelf`（每层架位数，选填）, `created_at`, `updated_at`。仅管理员维护；停用后不能再新建容器，已有记录不受影响；有容器或架子的冰箱不能删除。`shelf_count` 与 `racks_per_shelf` 同时填写时显示布局图；缩小或取消布局时不能有架子/容器落在布局之外。
+- `freezer_racks`：`id`, `freezer_id`, `shelf_no`, `position`（该层第几个架位，即容器的 `rack_no`）, `owner_id -> users.id`（分配给谁，可空 = 未分配）, `tiers`（架内层数，默认 5）, `depth`（每层盒位数，默认 4）, `remarks`, `created_at`, `updated_at`；`(freezer_id, shelf_no, position)` 唯一。仅管理员放置、分配、改规格、移除；架子上还有容器时不能移除，缩小规格时不能有盒子落在外面。改分配不移动已有盒子。
+- `freezer_containers`：`id`, `owner_id -> users.id`, `freezer_id`, `kind`（`box` 盒子 / `basket` 框）, `name`, `shelf_no`（层，必填）, `rack_no`（架，选填）, `slot_no`（架内格位，选填，无布局冰箱用）, `tier_no` / `depth_no`（架内第几层、该层第几个盒位，选填，须同时填写且只用于盒子；同一格位唯一）, `is_shared`（公共，仅管理员可设）, `remarks`, `created_at`, `updated_at`。只登记了架号、没有格位的盒子在布局图上显示为「待归位」。不设盒子规格；大箱子或框不填架号、格位。盒子在同一「冰箱/层/架/格」已有其他盒子时只提示，不阻止保存，提示不透露对方信息。只能删除没有在库样品的容器。
 - `freezer_samples`：`id`, `owner_id`, `container_id`（可空）, `name`（样品信息）, `project_no`, `sample_type`, `remarks`, `status`（`stored` / `removed`）, `stored_on`, `removed_at`, `created_at`, `updated_at`。一条 = 一管；在库样品必须有容器；容器删除后其中已取出样品的 `container_id` 置空。
 
 规则：
 
-- 容器和样品归创建人。普通用户只能查看和操作自己的；管理员，以及在账号管理中开启了「冰箱总览」（`users.freezer_view_all`）的成员，另有只读的「全部人员」视图（可按存放人筛选），不能修改他人数据。「冰箱总览」不带来任何其他管理权限，开关即时生效。
-- 批量存入：一次最多 500 管存到同一容器，可在同一事务里新建容器。
+- 容器和样品归创建人。普通用户只能查看和操作自己的（公共容器除外）；管理员，以及在账号管理中开启了「冰箱总览」（`users.freezer_view_all`）的成员，另有只读的「全部人员」视图（可按存放人筛选），不能修改他人数据。「冰箱总览」不带来任何其他管理权限，开关即时生效。
+- 架子：往已登记架子的位置放盒子（新建或搬入）时，该架子必须分配给本人；未分配的架子谁都不能放。原地修改（不搬位置）不检查分配。
+- 公共容器（如 -80℃ 最下层的公共框）：所有人都能看到其中全部样品并往里存入；每管样品仍只有存放人能取出、转移、修改和删除；流转记录所有人可看。只有管理员能设置/修改公共容器；里面还有任何人的在库样品时不能删除。
+- 批量存入：一次最多 500 管存到同一容器（自己的或公共的），可在同一事务里新建容器。
 - 批量取出 / 转移：取出只改状态、保留记录；转移到已有或新建容器；已取出的样品转入容器即放回。
 - 流转历史写入 `audit_logs`（`resource_type = freezer_sample`），`metadata_json` 记录原位置、新位置（当时的位置文字）和用途说明；修改记录旧值/新值；删除录错记录前写快照。容器搬位置记在容器自身的审计日志里。
+
+### feedback_threads / feedback_posts / feedback_reads（留言板）
+
+成员向管理员反馈问题（类似 issue），迁移 `007_feedback.sql`。
+
+- `feedback_threads`：`id`, `author_id -> users.id`, `title`（≤100 字）, `status`（`open` 待处理 / `closed` 已解决）, `last_post_at`, `created_at`, `updated_at`。
+- `feedback_posts`：`id`, `thread_id`, `author_id`（账号删除后置空）, `body`（≤5000 字）, `created_at`；第一条是发起时的正文。
+- `feedback_reads`：`(user_id, thread_id)` 主键，`read_at`：最后一次打开的时间。
+
+规则：成员只能看到、回复自己发起的留言；管理员看全部、可回复、可标记已解决/重新打开。未读 = 有别人发的、晚于自己 `read_at` 的帖子，导航栏「留言板」显示未读条数；打开即已读。不推送、不通知。审计日志只记标题和状态变化，不记正文。
 
 ### import_batches
 

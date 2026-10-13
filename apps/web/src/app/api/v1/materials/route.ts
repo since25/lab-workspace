@@ -10,7 +10,7 @@ const SORTABLE: Record<string, string> = {
   requester: "m.requester", receipt_status: "m.receipt_status", material_code: "m.material_code",
 };
 
-// 采购记录查询：关键词 + 小类/状态/收货状态筛选，按请购日期倒序分页
+// 采购记录查询：关键词 + 品牌/请购人/小类/状态/收货状态筛选（下拉选项取自现有数据），按请购日期倒序分页
 export const GET = handle(async (req: Request) => {
   await requireUser();
   const sp = new URL(req.url).searchParams;
@@ -24,14 +24,7 @@ export const GET = handle(async (req: Request) => {
       `(item_name ILIKE ${p} OR brand ILIKE ${p} OR spec_model ILIKE ${p} OR material_code ILIKE ${p} OR requester ILIKE ${p} OR project_code ILIKE ${p} OR request_no ILIKE ${p})`
     );
   }
-  for (const [param, col] of [["brand", "brand"], ["requester", "requester"]] as const) {
-    const v = str(sp.get(param));
-    if (v) {
-      params.push(`%${v}%`);
-      where.push(`${col} ILIKE $${params.length}`);
-    }
-  }
-  for (const [param, col] of [["category", "minor_category"], ["status", "status"], ["receipt", "receipt_status"]] as const) {
+  for (const [param, col] of [["brand", "brand"], ["requester", "requester"], ["category", "minor_category"], ["status", "status"], ["receipt", "receipt_status"]] as const) {
     const v = str(sp.get(param));
     if (v) {
       params.push(v);
@@ -49,7 +42,9 @@ export const GET = handle(async (req: Request) => {
   const facets = await query<{ col: string; v: string }>(
     `SELECT DISTINCT 'category' AS col, minor_category AS v FROM material_items WHERE minor_category <> ''
      UNION SELECT DISTINCT 'status', status FROM material_items WHERE status <> ''
-     UNION SELECT DISTINCT 'receipt', receipt_status FROM material_items WHERE receipt_status <> '' ORDER BY 1, 2`
+     UNION SELECT DISTINCT 'receipt', receipt_status FROM material_items WHERE receipt_status <> ''
+     UNION SELECT DISTINCT 'brand', brand FROM material_items WHERE brand <> ''
+     UNION SELECT DISTINCT 'requester', requester FROM material_items WHERE requester <> '' ORDER BY 1, 2`
   );
   const [last] = await query<{ filename: string; created_at: string; accepted_count: number }>(
     "SELECT filename, created_at, accepted_count FROM import_batches WHERE dataset_type = 'materials' AND status = 'committed' ORDER BY id DESC LIMIT 1"
@@ -60,7 +55,7 @@ export const GET = handle(async (req: Request) => {
     total: Number(count),
     page,
     page_size: PAGE,
-    facets: { category: group("category"), status: group("status"), receipt: group("receipt") },
+    facets: { category: group("category"), status: group("status"), receipt: group("receipt"), brand: group("brand"), requester: group("requester") },
     last_import: last ?? null,
   });
 });

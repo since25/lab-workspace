@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, errText } from "@/lib/client";
+import { api, download, errText } from "@/lib/client";
 import Combobox from "../Combobox";
 import ImportBox from "../ImportBox";
+import SuggestInput from "../SuggestInput";
 
 interface Cell {
   id: number;
@@ -39,30 +40,60 @@ const RACKS = [1, 2, 3, 4, 5, 6];
 const CN = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
 const EMPTY = { rack_no: "", layer_no: "", cell_name: "", source: "", passage: "", density: "", freezing_medium: "", tube_count: "", depositor: "", frozen_on: "", remarks: "", needs_review: false };
 type Form = typeof EMPTY;
+// 下拉候选（台账里已有的值）
+type Options = Record<"cell_name" | "source" | "freezing_medium" | "depositor", string[]>;
+const NO_OPTIONS: Options = { cell_name: [], source: [], freezing_medium: [], depositor: [] };
 
 export default function CellsClient({ initialReview }: { initialReview: boolean }) {
   const [cells, setCells] = useState<Cell[]>([]);
   const [stats, setStats] = useState({ total: 0, review: 0, racks: [] as number[] });
-  const [filter, setFilter] = useState({ rack: "", layer: "", q: "", review: initialReview });
+  const [filter, setFilter] = useState({ rack: "", layer: "", q: "", source: "", depositor: "", medium: "", review: initialReview });
+  const [options, setOptions] = useState<Options>(NO_OPTIONS);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [isAdmin, setIsAdmin] = useState(false);
   const [editing, setEditing] = useState<Cell | "new" | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
+  const filterParams = useCallback(() => {
     const sp = new URLSearchParams();
-    if (filter.rack) sp.set("rack", filter.rack);
-    if (filter.layer) sp.set("layer", filter.layer);
-    if (filter.q) sp.set("q", filter.q);
+    for (const k of ["rack", "layer", "q", "source", "depositor", "medium"] as const) {
+      if (filter[k]) sp.set(k, filter[k]);
+    }
     if (filter.review) sp.set("review", "1");
+    return sp;
+  }, [filter]);
+
+  const load = useCallback(async () => {
     try {
-      const d = await api<{ cells: Cell[]; stats: typeof stats }>(`/api/v1/cells?${sp}`);
+      const d = await api<{ cells: Cell[]; stats: typeof stats; options: Options }>(`/api/v1/cells?${filterParams()}`);
       setCells(d.cells);
       setStats(d.stats);
+      setOptions(d.options);
     } catch (e) {
       setError(errText(e));
     }
-  }, [filter]);
+  }, [filterParams]);
+
+  // 只对当前列表里看得见的勾选项导出（切换筛选后，被隐藏的勾选不计入）
+  const selectedIds = cells.filter((c) => selected.has(c.id)).map((c) => c.id);
+  const allChecked = cells.length > 0 && cells.every((c) => selected.has(c.id));
+  function toggle(id: number) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  }
+
+  async function exportExcel() {
+    const sp = filterParams();
+    if (selectedIds.length) sp.set("ids", selectedIds.join(","));
+    try {
+      await download(`/api/v1/cells/export?${sp}`, "细胞冻存.xlsx");
+    } catch (e) {
+      setError(errText(e));
+    }
+  }
 
   useEffect(() => {
     api<{ user: { role: string } }>("/api/v1/auth/me").then((d) => setIsAdmin(d.user.role === "admin"), () => {});
@@ -79,6 +110,7 @@ export default function CellsClient({ initialReview }: { initialReview: boolean 
     if (!Number.isInteger(k) || k <= 0) return alert("请输入正整数");
     if (c.tube_count === null) return alert("这条记录的管数未知，请先用「编辑」填写管数");
     if (k > c.tube_count) return alert("取出数量大于现有管数");
+    if (k === c.tube_count && !window.confirm(`注意：「${c.cell_name}」${c.tube_count === 1 ? "只剩这最后 1 管" : `只剩 ${c.tube_count} 管，将全部取出`}，取出后库存为 0。确定取出吗？`)) return;
     try {
       await api(`/api/v1/cells/${c.id}`, { method: "PATCH", body: JSON.stringify({ tube_count: c.tube_count - k }) });
       load();
@@ -111,11 +143,26 @@ export default function CellsClient({ initialReview }: { initialReview: boolean 
           搜索
           <input placeholder="细胞名称 / 来源 / 存放人" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
         </label>
+        <label className="field">
+          来源
+          <Combobox value={filter.source} allowEmpty options={options.source} onChange={(v) => setFilter({ ...filter, source: v })} />
+        </label>
+        <label className="field">
+          存放人
+          <Combobox value={filter.depositor} allowEmpty options={options.depositor} onChange={(v) => setFilter({ ...filter, depositor: v })} style={{ minWidth: 110 }} />
+        </label>
+        <label className="field">
+          冻存液
+          <Combobox value={filter.medium} allowEmpty options={options.freezing_medium} onChange={(v) => setFilter({ ...filter, medium: v })} />
+        </label>
         <label style={{ display: "flex", gap: 6, alignItems: "center", minHeight: 32 }}>
           <input type="checkbox" style={{ minHeight: 0 }} checked={filter.review} onChange={(e) => setFilter({ ...filter, review: e.target.checked })} />
           只看待核对（{stats.review}）
         </label>
         <span className="spacer" />
+        <button onClick={exportExcel} disabled={!cells.length}>
+          {selectedIds.length ? `导出所选（${selectedIds.length} 条）` : `导出当前结果（${cells.length} 条）`}
+        </button>
         <button onClick={() => setShowImport(!showImport)}>导入登记表</button>
         <button className="primary" onClick={() => setEditing("new")}>新增记录</button>
       </div>
@@ -139,13 +186,20 @@ export default function CellsClient({ initialReview }: { initialReview: boolean 
         <table>
           <thead>
             <tr>
+              <th style={{ width: 28 }}>
+                <input type="checkbox" aria-label="全选" style={{ minHeight: 0 }} checked={allChecked}
+                  onChange={() => setSelected(allChecked ? new Set() : new Set(cells.map((c) => c.id)))} />
+              </th>
               <th>位置</th><th>细胞名称</th><th>来源</th><th>代次</th><th>密度</th><th>冻存液</th>
               <th>管数</th><th>存放人</th><th>放入时间</th><th></th>
             </tr>
           </thead>
           <tbody>
             {cells.map((c) => (
-              <tr key={c.id}>
+              <tr key={c.id} className={c.tube_count === 1 ? "low-stock" : ""}>
+                <td>
+                  <input type="checkbox" aria-label={`选择 ${c.cell_name}`} style={{ minHeight: 0 }} checked={selected.has(c.id)} onChange={() => toggle(c.id)} />
+                </td>
                 <td style={{ whiteSpace: "nowrap" }}>{c.rack_no} 号架 第{CN[c.layer_no]}层</td>
                 <td className="pre">
                   {c.cell_name}
@@ -158,7 +212,10 @@ export default function CellsClient({ initialReview }: { initialReview: boolean 
                 <td>{c.passage}</td>
                 <td>{c.density}</td>
                 <td>{c.freezing_medium}</td>
-                <td className="num">{c.tube_count ?? (c.tube_count_raw ? <span className="muted">{c.tube_count_raw}</span> : "")}</td>
+                <td className="num nw">
+                  {c.tube_count ?? (c.tube_count_raw ? <span className="muted">{c.tube_count_raw}</span> : "")}
+                  {c.tube_count === 1 && <div><span className="flag">仅剩 1 管</span></div>}
+                </td>
                 <td>{c.depositor}</td>
                 <td style={{ whiteSpace: "nowrap" }}>{c.frozen_on ?? (c.frozen_on_raw ? <span className="muted">{c.frozen_on_raw}</span> : "")}</td>
                 <td className="actions">
@@ -168,21 +225,24 @@ export default function CellsClient({ initialReview }: { initialReview: boolean 
               </tr>
             ))}
             {!cells.length && (
-              <tr><td colSpan={10} className="muted">没有符合条件的记录</td></tr>
+              <tr><td colSpan={11} className="muted">没有符合条件的记录</td></tr>
             )}
           </tbody>
         </table>
       </div>
-      <p className="muted" style={{ marginTop: 8 }}>共 {stats.total} 条，当前显示 {cells.length} 条。</p>
+      <p className="muted" style={{ marginTop: 8 }}>
+        共 {stats.total} 条，当前显示 {cells.length} 条{selectedIds.length > 0 && <>，已勾选 {selectedIds.length} 条（<button className="link" onClick={() => setSelected(new Set())}>清除</button>）</>}。
+        只剩 1 管的记录以黄色标出。不勾选时导出当前筛选结果。
+      </p>
 
       {editing && (
-        <CellDialog cell={editing === "new" ? null : editing} isAdmin={isAdmin} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />
+        <CellDialog cell={editing === "new" ? null : editing} isAdmin={isAdmin} options={options} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />
       )}
     </>
   );
 }
 
-function CellDialog({ cell, isAdmin, onClose, onSaved }: { cell: Cell | null; isAdmin: boolean; onClose: () => void; onSaved: () => void }) {
+function CellDialog({ cell, isAdmin, options, onClose, onSaved }: { cell: Cell | null; isAdmin: boolean; options: Options; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<Form>(() =>
     cell
       ? {
@@ -191,7 +251,7 @@ function CellDialog({ cell, isAdmin, onClose, onSaved }: { cell: Cell | null; is
           tube_count: cell.tube_count === null ? "" : String(cell.tube_count), depositor: cell.depositor,
           frozen_on: cell.frozen_on ?? "", remarks: cell.remarks, needs_review: cell.needs_review,
         }
-      : EMPTY
+      : { ...EMPTY, frozen_on: new Date().toLocaleDateString("sv-SE") } // 新增时放入时间默认今天
   );
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [error, setError] = useState("");
@@ -233,6 +293,12 @@ function CellDialog({ cell, isAdmin, onClose, onSaved }: { cell: Cell | null; is
       <input value={String(form[k])} onChange={set(k)} {...props} />
     </label>
   );
+  const suggest = (k: keyof Options, label: string, wide = false) => (
+    <label className={`field${wide ? " wide" : ""}`}>
+      {label}
+      <SuggestInput value={form[k]} options={options[k]} onChange={(v) => setForm({ ...form, [k]: v })} />
+    </label>
+  );
 
   return (
     <div className="dialog-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -258,15 +324,12 @@ function CellDialog({ cell, isAdmin, onClose, onSaved }: { cell: Cell | null; is
           </label>
           {text("tube_count", "管数", { type: "number", min: 0 })}
           {text("frozen_on", "放入时间", { type: "date" })}
-          <label className="field wide">
-            细胞名称
-            <input value={form.cell_name} onChange={set("cell_name")} />
-          </label>
-          {text("source", "来源")}
+          {suggest("cell_name", "细胞名称", true)}
+          {suggest("source", "来源")}
           {text("passage", "代次")}
           {text("density", "细胞密度")}
-          {text("freezing_medium", "冻存液")}
-          {text("depositor", "存放人")}
+          {suggest("freezing_medium", "冻存液")}
+          {suggest("depositor", "存放人")}
           <label className="field wide">
             备注
             <input value={form.remarks} onChange={set("remarks")} />

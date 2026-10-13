@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import type { SessionUser } from "@/lib/auth";
 
 const LINKS = [
@@ -12,6 +13,7 @@ const LINKS = [
   { href: "/guides", label: "我的 Guide" },
   { href: "/tools/sanger", label: "Sanger 分析" },
   { href: "/tools/nanopore", label: "纳米孔分析" },
+  { href: "/feedback", label: "留言板" },
 ];
 const ADMIN_LINKS = [
   { href: "/admin/users", label: "账号管理" },
@@ -21,6 +23,16 @@ const ADMIN_LINKS = [
 export default function TopBar({ user }: { user: SessionUser }) {
   const path = usePathname();
   const links = user.role === "admin" ? [...LINKS, ...ADMIN_LINKS] : LINKS;
+  const [unread, setUnread] = useState(0);
+
+  // 留言板角标：切换页面时、以及打开某条留言后刷新（不轮询）
+  useEffect(() => {
+    const refresh = () =>
+      fetch("/api/v1/feedback/unread").then((r) => (r.ok ? r.json() : null)).then((d) => d && setUnread(d.count), () => {});
+    refresh();
+    window.addEventListener("feedback-read", refresh);
+    return () => window.removeEventListener("feedback-read", refresh);
+  }, [path]);
 
   async function logout() {
     await fetch("/api/v1/auth/logout", { method: "POST" });
@@ -36,6 +48,7 @@ export default function TopBar({ user }: { user: SessionUser }) {
         {links.map((l) => (
           <Link key={l.href} href={l.href} className={path.startsWith(l.href) ? "active" : ""}>
             {l.label}
+            {l.href === "/feedback" && unread > 0 && <span className="badge" aria-label={`${unread} 条未读`}>{unread}</span>}
           </Link>
         ))}
       </nav>

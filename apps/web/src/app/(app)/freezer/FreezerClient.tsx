@@ -2,51 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errText } from "@/lib/client";
-import { KIND_LABELS, SAMPLE_LABELS, TEMPERATURES, formatLocation, parseSampleLines, tempLabel } from "@/lib/freezer";
+import { CONTAINER_WORD, KIND_LABELS, SAMPLE_LABELS, TEMPERATURES, formatLocation, parseSampleLines, rackCellLabel, tempLabel } from "@/lib/freezer";
 import Combobox from "../Combobox";
+import FreezerMap from "./FreezerMap";
+import {
+  type Container, type ContainerForm, EMPTY_CONTAINER, type Freezer, type Rack, type Sample,
+  containerForm, containerLabel, hasLayout, sampleLocation,
+} from "./types";
 
-interface Freezer {
-  id: number;
-  name: string;
-  temperature: string;
-  location: string;
-  remarks: string;
-  is_active: boolean;
-}
-interface Container {
-  id: number;
-  owner_id: number;
-  owner_name: string;
-  freezer_id: number;
-  freezer_name: string;
-  temperature: string;
-  kind: string;
-  name: string;
-  shelf_no: number;
-  rack_no: number | null;
-  slot_no: number | null;
-  remarks: string;
-  sample_count: number;
-}
-interface Sample {
-  id: number;
-  owner_name: string;
-  container_id: number | null;
-  name: string;
-  project_no: string;
-  sample_type: string;
-  remarks: string;
-  status: "stored" | "removed";
-  stored_on: string;
-  removed_at: string | null;
-  kind: string | null;
-  container_name: string | null;
-  shelf_no: number | null;
-  rack_no: number | null;
-  slot_no: number | null;
-  freezer_name: string | null;
-  temperature: string | null;
-}
 interface HistoryItem {
   id: number;
   action: string;
@@ -61,18 +24,10 @@ const STATUS_OPTIONS = [
   { value: "all", label: "全部状态" },
 ];
 
-function sampleLocation(s: Sample) {
-  if (s.container_id === null || !s.freezer_name) return "";
-  return formatLocation({
-    freezer_name: s.freezer_name, temperature: s.temperature!, shelf_no: s.shelf_no!, rack_no: s.rack_no,
-    slot_no: s.slot_no, kind: s.kind!, name: s.container_name!,
-  });
-}
-const containerLabel = (c: Container) => `${formatLocation(c)} · ${c.sample_count} 管`;
-
-export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolean; canViewAll: boolean }) {
-  const [temp, setTemp] = useState("");
-  const [view, setView] = useState<"samples" | "containers">("samples");
+export default function FreezerClient({ userId, isAdmin, canViewAll }: { userId: number; isAdmin: boolean; canViewAll: boolean }) {
+  // 选项卡：按冰箱分（"" = 全部）
+  const [fid, setFid] = useState("");
+  const [view, setView] = useState<"map" | "samples" | "containers">("samples");
   const [scope, setScope] = useState<"mine" | "all">("mine");
   const [owner, setOwner] = useState("");
   const [filter, setFilter] = useState({ q: "", status: "stored", container: "" });
@@ -80,11 +35,13 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [containers, setContainers] = useState<Container[]>([]);
   const [freezers, setFreezers] = useState<Freezer[]>([]);
+  const [racks, setRacks] = useState<Rack[]>([]);
   const [users, setUsers] = useState<{ id: number; display_name: string }[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [dialog, setDialog] = useState<
     | { type: "container"; container: Container | null }
-    | { type: "store"; containerId: string }
+    | { type: "store"; containerId: string; preset?: ContainerForm }
+    | { type: "rack"; rack: Rack | { shelf_no: number; position: number } }
     | { type: "batch"; action: "remove" | "move" }
     | { type: "sample"; sample: Sample }
     | { type: "freezers" }
@@ -93,6 +50,10 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const readOnly = scope === "all";
+  const current = freezers.find((f) => String(f.id) === fid);
+  const showMap = hasLayout(current);
+  // 没有布局的冰箱不显示布局图
+  const effView = view === "map" && !showMap ? "samples" : view;
 
   const scopeParams = useCallback(() => {
     const sp = new URLSearchParams();
@@ -115,9 +76,15 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
       ),
     [scopeParams]
   );
+  const loadRacks = useCallback(() => {
+    if (!fid) return;
+    api<{ racks: Rack[] }>(`/api/v1/freezer/racks?freezer=${fid}`).then((d) => setRacks(d.racks), (e) => setError(errText(e)));
+  }, [fid]);
+  // 只用当前冰箱的架子（切换冰箱后、新数据回来前不显示上一台的）
+  const shownRacks = racks.filter((r) => String(r.freezer_id) === fid);
   const loadSamples = useCallback(async () => {
     const sp = scopeParams();
-    if (temp) sp.set("temp", temp);
+    if (fid) sp.set("freezer", fid);
     if (filter.q) sp.set("q", filter.q);
     sp.set("status", filter.status);
     if (filter.container) sp.set("container", filter.container);
@@ -129,10 +96,11 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
     } catch (e) {
       setError(errText(e));
     }
-  }, [scopeParams, temp, filter]);
+  }, [scopeParams, fid, filter]);
   const reload = () => {
     loadSamples();
     loadContainers();
+    loadRacks();
   };
 
   useEffect(() => {
@@ -145,13 +113,18 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
     loadContainers();
   }, [loadContainers]);
   useEffect(() => {
+    loadRacks();
+  }, [loadRacks]);
+  useEffect(() => {
     const t = setTimeout(loadSamples, 200);
     return () => clearTimeout(t);
   }, [loadSamples]);
-  // 只对当前列表里看得见的勾选项操作（切换温度或筛选后，被隐藏的勾选不计入）
-  const selectedIds = samples.filter((s) => selected.has(s.id)).map((s) => s.id);
+  // 只对当前列表里看得见、且是自己的勾选项操作（切换冰箱或筛选后，被隐藏的勾选不计入）
+  const mineSamples = readOnly ? [] : samples.filter((s) => s.owner_id === userId);
+  const selectedIds = mineSamples.filter((s) => selected.has(s.id)).map((s) => s.id);
+  const showOwner = readOnly || samples.some((s) => s.owner_id !== userId);
 
-  const shownContainers = useMemo(() => containers.filter((c) => !temp || c.temperature === temp), [containers, temp]);
+  const shownContainers = useMemo(() => containers.filter((c) => !fid || String(c.freezer_id) === fid), [containers, fid]);
 
   function toggle(id: number) {
     const next = new Set(selected);
@@ -159,7 +132,7 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
     else next.add(id);
     setSelected(next);
   }
-  const allChecked = samples.length > 0 && samples.every((s) => selected.has(s.id));
+  const allChecked = mineSamples.length > 0 && mineSamples.every((s) => selected.has(s.id));
 
   function done(msg = "") {
     setDialog(null);
@@ -183,18 +156,28 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
       </div>
 
       <div className="tabs" role="tablist">
-        {["", ...TEMPERATURES].map((t) => (
-          <button key={t} role="tab" aria-selected={temp === t} className={temp === t ? "active" : ""} onClick={() => setTemp(t)}>
-            {t ? tempLabel(t) : "全部"}
-            <span className="count">{(t ? counts[t] : counts.all) ?? 0}</span>
-          </button>
-        ))}
+        {[null, ...freezers].map((f) => {
+          const key = f ? String(f.id) : "";
+          return (
+            <button key={key} role="tab" aria-selected={fid === key} className={fid === key ? "active" : ""}
+              onClick={() => {
+                setFid(key);
+                setFilter({ ...filter, container: "" });
+                // 带布局的冰箱默认显示布局图
+                if (hasLayout(f ?? undefined)) setView("map");
+              }}>
+              {f ? <>{f.name}<span className="muted">（{tempLabel(f.temperature)}）</span></> : "全部"}
+              <span className="count">{(f ? counts[f.id] : counts.all) ?? 0}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="toolbar">
         <div className="seg">
-          <button className={view === "samples" ? "active" : ""} onClick={() => setView("samples")}>样品</button>
-          <button className={view === "containers" ? "active" : ""} onClick={() => setView("containers")}>容器</button>
+          {showMap && <button className={effView === "map" ? "active" : ""} onClick={() => setView("map")}>布局图</button>}
+          <button className={effView === "samples" ? "active" : ""} onClick={() => setView("samples")}>样品</button>
+          <button className={effView === "containers" ? "active" : ""} onClick={() => setView("containers")}>{CONTAINER_WORD}</button>
         </div>
         {readOnly && (
           <label className="field">
@@ -202,12 +185,12 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
             <Combobox value={owner} allowEmpty emptyLabel="全部人员" options={users.map((u) => ({ value: String(u.id), label: u.display_name }))} onChange={setOwner} />
           </label>
         )}
-        {view === "samples" && (
+        {effView === "samples" && (
           <>
             <label className="field">
               搜索
               <input
-                placeholder="样品 / 项目号 / 类型 / 备注 / 容器名"
+                placeholder="样品 / 项目号 / 类型 / 备注 / 盒子名"
                 value={filter.q}
                 onChange={(e) => setFilter({ ...filter, q: e.target.value })}
                 onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && loadSamples()}
@@ -219,11 +202,11 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
               <Combobox value={filter.status} options={STATUS_OPTIONS} onChange={(v) => setFilter({ ...filter, status: v })} />
             </label>
             <label className="field">
-              容器
+              {CONTAINER_WORD}
               <Combobox
                 value={filter.container}
                 allowEmpty
-                emptyLabel="全部容器"
+                emptyLabel="全部"
                 style={{ minWidth: 220 }}
                 options={shownContainers.map((c) => ({ value: String(c.id), label: containerLabel(c) }))}
                 onChange={(v) => setFilter({ ...filter, container: v })}
@@ -234,7 +217,7 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
         <span className="spacer" />
         {!readOnly && (
           <>
-            <button onClick={() => setDialog({ type: "container", container: null })}>新建容器</button>
+            <button onClick={() => setDialog({ type: "container", container: null })}>新建{CONTAINER_WORD}</button>
             <button className="primary" onClick={() => setDialog({ type: "store", containerId: filter.container })}>批量存入</button>
           </>
         )}
@@ -247,16 +230,30 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
       {message && <div className="notice">{message}</div>}
       {error && <div className="error">{error}</div>}
 
-      {view === "samples" ? (
+      {effView === "map" && hasLayout(current) ? (
+        <FreezerMap
+          freezer={current}
+          racks={shownRacks}
+          containers={shownContainers}
+          userId={userId}
+          isAdmin={isAdmin}
+          readOnly={readOnly}
+          onStore={(t) => setDialog("preset" in t ? { type: "store", containerId: "", preset: t.preset } : { type: "store", containerId: t.containerId })}
+          onEditContainer={(c) => setDialog({ type: "container", container: c })}
+          onShowSamples={(c) => { setFilter({ q: "", status: "stored", container: String(c.id) }); setView("samples"); }}
+          onRack={(rack) => setDialog({ type: "rack", rack })}
+          onChanged={(msg) => { setMessage(msg ?? ""); reload(); }}
+        />
+      ) : effView === "samples" ? (
         <>
           {!readOnly && samples.length > 0 && (
             <div className="selbar">
-              <button onClick={() => setSelected(allChecked ? new Set() : new Set(samples.map((s) => s.id)))}>
-                {allChecked ? "取消全选" : `全选当前结果（${samples.length} 管）`}
+              <button onClick={() => setSelected(allChecked ? new Set() : new Set(mineSamples.map((s) => s.id)))}>
+                {allChecked ? "取消全选" : `全选我的（${mineSamples.length} 管）`}
               </button>
               <span>已选 {selectedIds.length} 管</span>
               <button disabled={!selectedIds.length} onClick={() => setDialog({ type: "batch", action: "remove" })}>取出</button>
-              <button disabled={!selectedIds.length} onClick={() => setDialog({ type: "batch", action: "move" })}>转移到容器…</button>
+              <button disabled={!selectedIds.length} onClick={() => setDialog({ type: "batch", action: "move" })}>转移到{CONTAINER_WORD}…</button>
               {selectedIds.length > 0 && <button className="link" onClick={() => setSelected(new Set())}>清除选择</button>}
             </div>
           )}
@@ -267,11 +264,11 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
                   {!readOnly && (
                     <th style={{ width: 28 }}>
                       <input type="checkbox" aria-label="全选" style={{ minHeight: 0 }} checked={allChecked}
-                        onChange={() => setSelected(allChecked ? new Set() : new Set(samples.map((s) => s.id)))} />
+                        onChange={() => setSelected(allChecked ? new Set() : new Set(mineSamples.map((s) => s.id)))} />
                     </th>
                   )}
                   <th>样品信息</th><th>位置</th><th>项目号</th><th>样品类型</th><th>备注</th><th>存入日期</th>
-                  {readOnly && <th>存放人</th>}
+                  {showOwner && <th>存放人</th>}
                   {filter.status !== "stored" && <th>状态</th>}
                   <th></th>
                 </tr>
@@ -281,21 +278,26 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
                   <tr key={s.id}>
                     {!readOnly && (
                       <td>
-                        <input type="checkbox" aria-label={`选择 ${s.name}`} style={{ minHeight: 0 }} checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+                        {s.owner_id === userId && (
+                          <input type="checkbox" aria-label={`选择 ${s.name}`} style={{ minHeight: 0 }} checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+                        )}
                       </td>
                     )}
                     <td className="text-col">{s.name}</td>
-                    <td className="text-col">{sampleLocation(s) || <span className="muted">（容器已删除）</span>}</td>
+                    <td className="text-col">
+                      {s.is_shared && <span className="tag">公共</span>}
+                      {sampleLocation(s) || <span className="muted">（盒子/框已删除）</span>}
+                    </td>
                     <td>{s.project_no}</td>
                     <td>{s.sample_type}</td>
                     <td className="text-col">{s.remarks}</td>
                     <td className="nw">{s.stored_on}</td>
-                    {readOnly && <td className="nw">{s.owner_name}</td>}
+                    {showOwner && <td className="nw">{s.owner_name}</td>}
                     {filter.status !== "stored" && (
                       <td className="nw">{s.status === "stored" ? "在库" : <span className="flag">已取出</span>}</td>
                     )}
                     <td className="actions">
-                      <button className="link" onClick={() => setDialog({ type: "sample", sample: s })}>{readOnly ? "详情" : "编辑"}</button>
+                      <button className="link" onClick={() => setDialog({ type: "sample", sample: s })}>{readOnly || s.owner_id !== userId ? "详情" : "编辑"}</button>
                     </td>
                   </tr>
                 ))}
@@ -307,7 +309,7 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
           </div>
           <p className="muted" style={{ marginTop: 8 }}>
             当前显示 {samples.length} 管。
-            {readOnly ? "每管的流转记录在「详情」里查看。" : "勾选样品后可批量取出或转移到其他容器（可当场新建容器），每管的流转记录在「编辑」里查看。"}
+            {readOnly ? "每管的流转记录在「详情」里查看。" : "勾选样品后可批量取出或转移到其他盒子/框（可当场新建），每管的流转记录在「编辑」里查看。公共框里别人存的样品只能查看。"}
           </p>
         </>
       ) : (
@@ -315,7 +317,7 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
           <table>
             <thead>
               <tr>
-                <th>容器</th><th>位置</th><th>在库样品</th><th>备注</th>
+                <th>{CONTAINER_WORD}</th><th>位置</th><th>在库样品</th><th>备注</th>
                 {readOnly && <th>存放人</th>}
                 <th></th>
               </tr>
@@ -323,7 +325,7 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
             <tbody>
               {shownContainers.map((c) => (
                 <tr key={c.id}>
-                  <td className="text-col">{KIND_LABELS[c.kind]}「{c.name}」</td>
+                  <td className="text-col">{c.is_shared && <span className="tag">公共</span>}{KIND_LABELS[c.kind]}「{c.name}」</td>
                   <td className="text-col">{formatLocation(c)}</td>
                   <td className="num">{c.sample_count}</td>
                   <td className="text-col">{c.remarks}</td>
@@ -333,14 +335,16 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
                     {!readOnly && (
                       <>
                         <button className="link" onClick={() => setDialog({ type: "store", containerId: String(c.id) })}>存入</button>
-                        <button className="link" onClick={() => setDialog({ type: "container", container: c })}>编辑</button>
+                        {(c.owner_id === userId || (c.is_shared && isAdmin)) && (
+                          <button className="link" onClick={() => setDialog({ type: "container", container: c })}>编辑</button>
+                        )}
                       </>
                     )}
                   </td>
                 </tr>
               ))}
               {!shownContainers.length && (
-                <tr><td colSpan={6} className="muted">没有容器</td></tr>
+                <tr><td colSpan={6} className="muted">没有盒子/框</td></tr>
               )}
             </tbody>
           </table>
@@ -348,83 +352,113 @@ export default function FreezerClient({ isAdmin, canViewAll }: { isAdmin: boolea
       )}
 
       {dialog?.type === "container" && (
-        <ContainerDialog container={dialog.container} freezers={freezers} onClose={() => setDialog(null)} onSaved={done} />
+        <ContainerDialog container={dialog.container} freezers={freezers} isAdmin={isAdmin} defaultFreezer={fid} onClose={() => setDialog(null)} onSaved={done} />
       )}
       {dialog?.type === "store" && (
-        <StoreDialog initialContainer={dialog.containerId} containers={containers} freezers={freezers} onClose={() => setDialog(null)} onSaved={done} />
+        <StoreDialog initialContainer={dialog.containerId} preset={dialog.preset} containers={containers} freezers={freezers} isAdmin={isAdmin} onClose={() => setDialog(null)} onSaved={done} />
       )}
       {dialog?.type === "batch" && (
-        <BatchDialog action={dialog.action} ids={selectedIds} containers={containers} freezers={freezers} onClose={() => setDialog(null)} onSaved={done} />
+        <BatchDialog action={dialog.action} ids={selectedIds} containers={containers} freezers={freezers} isAdmin={isAdmin} onClose={() => setDialog(null)} onSaved={done} />
       )}
       {dialog?.type === "sample" && (
-        <SampleDialog sample={dialog.sample} readOnly={readOnly} onClose={() => setDialog(null)} onSaved={done} />
+        <SampleDialog sample={dialog.sample} readOnly={readOnly || dialog.sample.owner_id !== userId} onClose={() => setDialog(null)} onSaved={done} />
       )}
       {dialog?.type === "freezers" && (
         <FreezersDialog freezers={freezers} onClose={() => setDialog(null)} onChanged={() => { loadFreezers(); loadContainers(); }} />
+      )}
+      {dialog?.type === "rack" && current && (
+        <RackDialog freezerId={current.id} rack={dialog.rack} onClose={() => setDialog(null)} onSaved={done} />
       )}
     </>
   );
 }
 
-// ---------- 容器表单 ----------
+// ---------- 盒子/框表单 ----------
 
-const EMPTY_CONTAINER = { freezer_id: "", kind: "box", name: "", shelf_no: "", rack_no: "", slot_no: "", remarks: "" };
-type ContainerForm = typeof EMPTY_CONTAINER;
-
-function containerForm(c: Container | null): ContainerForm {
-  if (!c) return EMPTY_CONTAINER;
-  return {
-    freezer_id: String(c.freezer_id), kind: c.kind, name: c.name, shelf_no: String(c.shelf_no),
-    rack_no: c.rack_no === null ? "" : String(c.rack_no), slot_no: c.slot_no === null ? "" : String(c.slot_no), remarks: c.remarks,
-  };
-}
-
-function ContainerFields({ form, setForm, freezers }: { form: ContainerForm; setForm: (f: ContainerForm) => void; freezers: Freezer[] }) {
+function ContainerFields({ form, setForm, freezers, isAdmin, fixedPlace }: {
+  form: ContainerForm; setForm: (f: ContainerForm) => void; freezers: Freezer[]; isAdmin: boolean;
+  // 从布局图点空格新建时，位置已定，只填名称和备注
+  fixedPlace?: string;
+}) {
   const set = (k: keyof ContainerForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
+  const layout = hasLayout(freezers.find((f) => String(f.id) === form.freezer_id));
   return (
     <div className="form-grid">
-      <label className="field">
-        冰箱
-        <Combobox
-          value={form.freezer_id}
-          options={freezers.filter((f) => f.is_active).map((f) => ({ value: String(f.id), label: `${f.name}（${tempLabel(f.temperature)}）` }))}
-          onChange={(v) => setForm({ ...form, freezer_id: v })}
-        />
-      </label>
-      <label className="field">
-        类型
-        <div className="seg">
-          {Object.entries(KIND_LABELS).map(([k, label]) => (
-            <button key={k} type="button" className={form.kind === k ? "active" : ""} onClick={() => setForm({ ...form, kind: k })}>{label}</button>
-          ))}
-        </div>
-      </label>
+      {fixedPlace ? (
+        <div className="field wide">位置：{fixedPlace}</div>
+      ) : (
+        <>
+          <label className="field">
+            冰箱
+            <Combobox
+              value={form.freezer_id}
+              options={freezers.filter((f) => f.is_active).map((f) => ({ value: String(f.id), label: `${f.name}（${tempLabel(f.temperature)}）` }))}
+              onChange={(v) => setForm({ ...form, freezer_id: v })}
+            />
+          </label>
+          <label className="field">
+            类型
+            <div className="seg">
+              {Object.entries(KIND_LABELS).map(([k, label]) => (
+                <button key={k} type="button" className={form.kind === k ? "active" : ""} onClick={() => setForm({ ...form, kind: k })}>{label}</button>
+              ))}
+            </div>
+          </label>
+        </>
+      )}
       <label className="field wide">
-        容器名称
-        <input value={form.name} placeholder="如：XX 部门交付试剂 2026-10" onChange={set("name")} />
+        {form.kind === "basket" ? "框" : "盒子"}名称
+        <input value={form.name} placeholder="如：张三 质粒盒 1、XX 部门交付试剂 2026-10" onChange={set("name")} />
       </label>
-      <label className="field">
-        第几层
-        <input type="number" min={1} value={form.shelf_no} onChange={set("shelf_no")} />
-      </label>
-      <label className="field">
-        第几个架子（选填）
-        <input type="number" min={1} value={form.rack_no} onChange={set("rack_no")} />
-      </label>
-      <label className="field">
-        架内第几格（选填）
-        <input type="number" min={1} value={form.slot_no} onChange={set("slot_no")} />
-      </label>
+      {!fixedPlace && (
+        <>
+          <label className="field">
+            冰箱第几层
+            <input type="number" min={1} value={form.shelf_no} onChange={set("shelf_no")} />
+          </label>
+          <label className="field">
+            第几个架子（选填）
+            <input type="number" min={1} value={form.rack_no} onChange={set("rack_no")} />
+          </label>
+          {layout ? (
+            <>
+              <label className="field">
+                架内第几层（选填）
+                <input type="number" min={1} value={form.tier_no} onChange={set("tier_no")} />
+              </label>
+              <label className="field">
+                该层第几盒（选填）
+                <input type="number" min={1} value={form.depth_no} onChange={set("depth_no")} />
+              </label>
+            </>
+          ) : (
+            <label className="field">
+              架内第几格（选填）
+              <input type="number" min={1} value={form.slot_no} onChange={set("slot_no")} />
+            </label>
+          )}
+        </>
+      )}
       <label className="field wide">
         备注
         <input value={form.remarks} onChange={set("remarks")} />
       </label>
+      {isAdmin && !fixedPlace && (
+        <label className="wide" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="checkbox" style={{ minHeight: 0 }} checked={form.is_shared} onChange={(e) => setForm({ ...form, is_shared: e.target.checked })} />
+          公共（所有人都能看到并往里存入，每管样品只有存放人能取出和修改）
+        </label>
+      )}
     </div>
   );
 }
 
-function ContainerDialog({ container, freezers, onClose, onSaved }: { container: Container | null; freezers: Freezer[]; onClose: () => void; onSaved: (msg?: string) => void }) {
-  const [form, setForm] = useState(() => containerForm(container));
+const CONTAINER_HINT = "盒子/框 = 冰箱里的一个冻存盒或一个框。试剂/样品的名称不在这里填，建好后点「存入」逐管填写；一个框里有几种试剂就填几行。";
+
+function ContainerDialog({ container, freezers, isAdmin, defaultFreezer, onClose, onSaved }: {
+  container: Container | null; freezers: Freezer[]; isAdmin: boolean; defaultFreezer: string; onClose: () => void; onSaved: (msg?: string) => void;
+}) {
+  const [form, setForm] = useState(() => (container ? containerForm(container) : { ...EMPTY_CONTAINER, freezer_id: defaultFreezer }));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -435,7 +469,7 @@ function ContainerDialog({ container, freezers, onClose, onSaved }: { container:
       const d = container
         ? await api<{ warning: string }>(`/api/v1/freezer/containers/${container.id}`, { method: "PATCH", body: JSON.stringify(form) })
         : await api<{ warning: string }>("/api/v1/freezer/containers", { method: "POST", body: JSON.stringify(form) });
-      onSaved(d.warning || (container ? "容器已保存。" : "容器已新建，可以点「存入」放样品。"));
+      onSaved(d.warning || (container ? "已保存。" : "已新建，可以点「存入」放样品。"));
     } catch (e) {
       setError(errText(e));
       setBusy(false);
@@ -443,22 +477,22 @@ function ContainerDialog({ container, freezers, onClose, onSaved }: { container:
   }
 
   async function remove() {
-    if (!container || !window.confirm(`删除容器「${container.name}」？只能删除没有在库样品的容器。`)) return;
+    if (!container || !window.confirm(`删除「${container.name}」？只能删除里面没有在库样品的盒子/框。`)) return;
     try {
       await api(`/api/v1/freezer/containers/${container.id}`, { method: "DELETE" });
-      onSaved("容器已删除。");
+      onSaved("已删除。");
     } catch (e) {
       setError(errText(e));
     }
   }
 
   return (
-    <Dialog title={container ? "编辑容器" : "新建容器"} onClose={onClose}>
-      {container && <p className="muted">修改位置后，容器里的样品随之一起移动。</p>}
-      <ContainerFields form={form} setForm={setForm} freezers={freezers} />
+    <Dialog title={container ? `编辑${CONTAINER_WORD}` : `新建${CONTAINER_WORD}`} onClose={onClose}>
+      <p className="muted">{container ? "修改位置后，里面的样品随之一起移动。" : CONTAINER_HINT}</p>
+      <ContainerFields form={form} setForm={setForm} freezers={freezers} isAdmin={isAdmin} />
       {error && <div className="error">{error}</div>}
       <div className="dialog-actions">
-        {container && <button className="danger" style={{ marginRight: "auto" }} onClick={remove}>删除容器</button>}
+        {container && <button className="danger" style={{ marginRight: "auto" }} onClick={remove}>删除</button>}
         <button onClick={onClose}>取消</button>
         <button className="primary" onClick={save} disabled={busy}>保存</button>
       </div>
@@ -468,26 +502,29 @@ function ContainerDialog({ container, freezers, onClose, onSaved }: { container:
 
 // 选择已有容器或当场新建（批量存入、批量转移共用）
 function TargetPicker({
-  mode, setMode, containerId, setContainerId, form, setForm, containers, freezers,
+  mode, setMode, containerId, setContainerId, form, setForm, containers, freezers, isAdmin,
 }: {
   mode: "existing" | "new"; setMode: (m: "existing" | "new") => void;
   containerId: string; setContainerId: (v: string) => void;
   form: ContainerForm; setForm: (f: ContainerForm) => void;
-  containers: Container[]; freezers: Freezer[];
+  containers: Container[]; freezers: Freezer[]; isAdmin: boolean;
 }) {
   return (
     <>
       <div className="seg" style={{ marginBottom: 12 }}>
-        <button type="button" className={mode === "existing" ? "active" : ""} onClick={() => setMode("existing")}>已有容器</button>
-        <button type="button" className={mode === "new" ? "active" : ""} onClick={() => setMode("new")}>新建容器</button>
+        <button type="button" className={mode === "existing" ? "active" : ""} onClick={() => setMode("existing")}>已有{CONTAINER_WORD}</button>
+        <button type="button" className={mode === "new" ? "active" : ""} onClick={() => setMode("new")}>新建{CONTAINER_WORD}</button>
       </div>
       {mode === "existing" ? (
         <label className="field" style={{ marginBottom: 12 }}>
-          目标容器
-          <Combobox value={containerId} placeholder="选择容器" options={containers.map((c) => ({ value: String(c.id), label: containerLabel(c) }))} onChange={setContainerId} />
+          放到哪个{CONTAINER_WORD}
+          <Combobox value={containerId} placeholder="选择" options={containers.map((c) => ({ value: String(c.id), label: containerLabel(c) }))} onChange={setContainerId} />
         </label>
       ) : (
-        <ContainerFields form={form} setForm={setForm} freezers={freezers} />
+        <>
+          <p className="muted">{CONTAINER_HINT}</p>
+          <ContainerFields form={form} setForm={setForm} freezers={freezers} isAdmin={isAdmin} />
+        </>
       )}
     </>
   );
@@ -499,12 +536,18 @@ function targetBody(mode: "existing" | "new", containerId: string, form: Contain
 
 // ---------- 批量存入 ----------
 
-function StoreDialog({ initialContainer, containers, freezers, onClose, onSaved }: {
-  initialContainer: string; containers: Container[]; freezers: Freezer[]; onClose: () => void; onSaved: (msg?: string) => void;
+function StoreDialog({ initialContainer, preset, containers, freezers, isAdmin, onClose, onSaved }: {
+  initialContainer: string; preset?: ContainerForm; containers: Container[]; freezers: Freezer[]; isAdmin: boolean;
+  onClose: () => void; onSaved: (msg?: string) => void;
 }) {
-  const [mode, setMode] = useState<"existing" | "new">(containers.length ? "existing" : "new");
+  const [mode, setMode] = useState<"existing" | "new">(preset || !containers.length ? "new" : "existing");
   const [containerId, setContainerId] = useState(initialContainer);
-  const [form, setForm] = useState(EMPTY_CONTAINER);
+  const [form, setForm] = useState(preset ?? EMPTY_CONTAINER);
+  const presetPlace = useMemo(() => {
+    if (!preset) return "";
+    const f = freezers.find((x) => String(x.id) === preset.freezer_id);
+    return `${f?.name ?? ""} · 第${preset.shelf_no}层 · ${preset.rack_no}号架 · ${rackCellLabel(Number(preset.tier_no), Number(preset.depth_no))}`;
+  }, [preset, freezers]);
   const [defaults, setDefaults] = useState({ project_no: "", sample_type: "", remarks: "" });
   const [storedOn, setStoredOn] = useState(() => new Date().toLocaleDateString("sv-SE"));
   const [text, setText] = useState("");
@@ -529,9 +572,13 @@ function StoreDialog({ initialContainer, containers, freezers, onClose, onSaved 
   }
 
   return (
-    <Dialog title="批量存入" onClose={onClose} wide>
-      <h2 style={{ marginTop: 0 }}>1. 存到哪个容器</h2>
-      <TargetPicker mode={mode} setMode={setMode} containerId={containerId} setContainerId={setContainerId} form={form} setForm={setForm} containers={containers} freezers={freezers} />
+    <Dialog title={preset ? "放新盒子并存入样品" : "批量存入"} onClose={onClose} wide>
+      <h2 style={{ marginTop: 0 }}>1. {preset ? "给这个盒子起个名字" : `存到哪个${CONTAINER_WORD}`}</h2>
+      {preset ? (
+        <ContainerFields form={form} setForm={setForm} freezers={freezers} isAdmin={isAdmin} fixedPlace={presetPlace} />
+      ) : (
+        <TargetPicker mode={mode} setMode={setMode} containerId={containerId} setContainerId={setContainerId} form={form} setForm={setForm} containers={containers} freezers={freezers} isAdmin={isAdmin} />
+      )}
       <h2>2. 样品清单（一行一管）</h2>
       <p className="muted">
         每行依次为：样品信息、项目号、样品类型、备注，可直接从 Excel 复制这几列粘贴；只写样品信息也可以，其余列留空时使用下面的统一填写。
@@ -560,7 +607,7 @@ function StoreDialog({ initialContainer, containers, freezers, onClose, onSaved 
       {error && <div className="error">{error}</div>}
       <div className="dialog-actions">
         <button onClick={onClose}>取消</button>
-        <button className="primary" onClick={save} disabled={busy || !rows.length}>存入 {rows.length} 管</button>
+        <button className="primary" onClick={save} disabled={busy || !rows.length || (!!preset && !form.name.trim())}>存入 {rows.length} 管</button>
       </div>
     </Dialog>
   );
@@ -568,8 +615,8 @@ function StoreDialog({ initialContainer, containers, freezers, onClose, onSaved 
 
 // ---------- 批量取出 / 转移 ----------
 
-function BatchDialog({ action, ids, containers, freezers, onClose, onSaved }: {
-  action: "remove" | "move"; ids: number[]; containers: Container[]; freezers: Freezer[]; onClose: () => void; onSaved: (msg?: string) => void;
+function BatchDialog({ action, ids, containers, freezers, isAdmin, onClose, onSaved }: {
+  action: "remove" | "move"; ids: number[]; containers: Container[]; freezers: Freezer[]; isAdmin: boolean; onClose: () => void; onSaved: (msg?: string) => void;
 }) {
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [containerId, setContainerId] = useState("");
@@ -587,7 +634,7 @@ function BatchDialog({ action, ids, containers, freezers, onClose, onSaved }: {
         body: JSON.stringify({ ids, action, note, ...(action === "move" ? targetBody(mode, containerId, form) : {}) }),
       });
       const verb = action === "remove" ? "取出" : "转移";
-      onSaved(`已${verb} ${d.done} 管${d.skipped ? `，${d.skipped} 管无需处理（已取出或已在目标容器）` : ""}。${d.warning}`);
+      onSaved(`已${verb} ${d.done} 管${d.skipped ? `，${d.skipped} 管无需处理（已取出或已在目标位置）` : ""}。${d.warning}`);
     } catch (e) {
       setError(errText(e));
       setBusy(false);
@@ -597,9 +644,9 @@ function BatchDialog({ action, ids, containers, freezers, onClose, onSaved }: {
   return (
     <Dialog title={action === "remove" ? `取出 ${ids.length} 管` : `转移 ${ids.length} 管`} onClose={onClose}>
       {action === "remove" ? (
-        <p className="muted">取出后样品默认不再显示在库存中，记录保留，可在状态「已取出」里查到，也可再转移回容器。</p>
+        <p className="muted">取出后样品默认不再显示在库存中，记录保留，可在状态「已取出」里查到，也可再转移回盒子/框。</p>
       ) : (
-        <TargetPicker mode={mode} setMode={setMode} containerId={containerId} setContainerId={setContainerId} form={form} setForm={setForm} containers={containers} freezers={freezers} />
+        <TargetPicker mode={mode} setMode={setMode} containerId={containerId} setContainerId={setContainerId} form={form} setForm={setForm} containers={containers} freezers={freezers} isAdmin={isAdmin} />
       )}
       <label className="field">
         用途 / 说明（选填）
@@ -658,7 +705,7 @@ function SampleDialog({ sample, readOnly, onClose, onSaved }: { sample: Sample; 
   return (
     <Dialog title={readOnly ? "样品详情" : "编辑样品"} onClose={onClose}>
       <p className="muted">
-        位置：{sampleLocation(sample) || "（容器已删除）"}
+        位置：{sampleLocation(sample) || "（盒子/框已删除）"}
         {sample.status === "removed" && <> · <span className="flag">已取出</span></>}
         {readOnly && <> · 存放人：{sample.owner_name}</>}
       </p>
@@ -699,7 +746,7 @@ function SampleDialog({ sample, readOnly, onClose, onSaved }: { sample: Sample; 
 
 // ---------- 冰箱清单（管理员） ----------
 
-const EMPTY_FREEZER = { name: "", temperature: "-80", location: "", remarks: "", is_active: true };
+const EMPTY_FREEZER = { name: "", temperature: "-80", location: "", remarks: "", is_active: true, shelf_count: "", racks_per_shelf: "" };
 
 function FreezersDialog({ freezers, onClose, onChanged }: { freezers: Freezer[]; onClose: () => void; onChanged: () => void }) {
   const [editing, setEditing] = useState<number | "new" | null>(null);
@@ -709,7 +756,14 @@ function FreezersDialog({ freezers, onClose, onChanged }: { freezers: Freezer[];
   function edit(f: Freezer | null) {
     setError("");
     setEditing(f ? f.id : "new");
-    setForm(f ? { name: f.name, temperature: f.temperature, location: f.location, remarks: f.remarks, is_active: f.is_active } : EMPTY_FREEZER);
+    setForm(
+      f
+        ? {
+            name: f.name, temperature: f.temperature, location: f.location, remarks: f.remarks, is_active: f.is_active,
+            shelf_count: f.shelf_count === null ? "" : String(f.shelf_count), racks_per_shelf: f.racks_per_shelf === null ? "" : String(f.racks_per_shelf),
+          }
+        : EMPTY_FREEZER
+    );
   }
 
   async function save() {
@@ -725,7 +779,7 @@ function FreezersDialog({ freezers, onClose, onChanged }: { freezers: Freezer[];
   }
 
   async function remove(f: Freezer) {
-    if (!window.confirm(`删除冰箱「${f.name}」？只能删除没有登记容器的冰箱。`)) return;
+    if (!window.confirm(`删除冰箱「${f.name}」？只能删除没有登记盒子/框和架子的冰箱。`)) return;
     setError("");
     try {
       await api(`/api/v1/freezer/freezers/${f.id}`, { method: "DELETE" });
@@ -737,14 +791,19 @@ function FreezersDialog({ freezers, onClose, onChanged }: { freezers: Freezer[];
 
   return (
     <Dialog title="管理冰箱" onClose={onClose}>
-      <p className="muted">冰箱由管理员统一维护，其他人新建容器时只能从这里选择。停用后不能再往里新建容器，已有记录不受影响。</p>
+      <p className="muted">
+        冰箱由管理员统一维护，其他人新建盒子/框时只能从这里选择。停用后不能再往里新建，已有记录不受影响。
+        带架子的冰箱（如 -80℃）填写「布局」后会显示布局图，可在图上放架子并分配给个人；只有隔板的冰箱不用填。
+      </p>
       <div className="table-wrap" style={{ marginBottom: 12 }}>
         <table>
-          <thead><tr><th>名称</th><th>温度</th><th>存放地点</th><th>备注</th><th>状态</th><th></th></tr></thead>
+          <thead><tr><th>名称</th><th>温度</th><th>布局</th><th>存放地点</th><th>备注</th><th>状态</th><th></th></tr></thead>
           <tbody>
             {freezers.map((f) => (
               <tr key={f.id}>
-                <td>{f.name}</td><td className="nw">{tempLabel(f.temperature)}</td><td>{f.location}</td><td>{f.remarks}</td>
+                <td>{f.name}</td><td className="nw">{tempLabel(f.temperature)}</td>
+                <td className="nw">{hasLayout(f) ? `${f.shelf_count} 层 × 每层 ${f.racks_per_shelf} 架` : <span className="muted">—</span>}</td>
+                <td>{f.location}</td><td>{f.remarks}</td>
                 <td className="nw">{f.is_active ? "启用" : <span className="muted">停用</span>}</td>
                 <td className="actions">
                   <button className="link" onClick={() => edit(f)}>编辑</button>
@@ -752,7 +811,7 @@ function FreezersDialog({ freezers, onClose, onChanged }: { freezers: Freezer[];
                 </td>
               </tr>
             ))}
-            {!freezers.length && <tr><td colSpan={6} className="muted">还没有冰箱</td></tr>}
+            {!freezers.length && <tr><td colSpan={7} className="muted">还没有冰箱</td></tr>}
           </tbody>
         </table>
       </div>
@@ -768,6 +827,14 @@ function FreezersDialog({ freezers, onClose, onChanged }: { freezers: Freezer[];
             </label>
             <label className="field">存放地点<input value={form.location} placeholder="如：203 室" onChange={(e) => setForm({ ...form, location: e.target.value })} /></label>
             <label className="field">备注<input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></label>
+            <label className="field">
+              布局：总层数（带架子的才填）
+              <input type="number" min={1} max={20} value={form.shelf_count} placeholder="如 4" onChange={(e) => setForm({ ...form, shelf_count: e.target.value })} />
+            </label>
+            <label className="field">
+              布局：每层几个架位
+              <input type="number" min={1} max={20} value={form.racks_per_shelf} placeholder="如 4" onChange={(e) => setForm({ ...form, racks_per_shelf: e.target.value })} />
+            </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input type="checkbox" style={{ minHeight: 0 }} checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
               启用
@@ -782,6 +849,77 @@ function FreezersDialog({ freezers, onClose, onChanged }: { freezers: Freezer[];
       {error && <div className="error">{error}</div>}
       <div className="dialog-actions">
         <button onClick={onClose}>关闭</button>
+      </div>
+    </Dialog>
+  );
+}
+
+// ---------- 架子（管理员）：放置、分配、规格、移除 ----------
+
+function RackDialog({ freezerId, rack, onClose, onSaved }: {
+  freezerId: number; rack: Rack | { shelf_no: number; position: number }; onClose: () => void; onSaved: (msg?: string) => void;
+}) {
+  const existing = "id" in rack ? rack : null;
+  const [form, setForm] = useState({
+    owner_id: existing?.owner_id ? String(existing.owner_id) : "",
+    tiers: String(existing?.tiers ?? 5),
+    depth: String(existing?.depth ?? 4),
+    remarks: existing?.remarks ?? "",
+  });
+  const [users, setUsers] = useState<{ id: number; display_name: string; username: string; is_active: boolean }[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<{ users: typeof users }>("/api/v1/admin/users").then((d) => setUsers(d.users.filter((u) => u.is_active)), (e) => setError(errText(e)));
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      if (existing) await api(`/api/v1/freezer/racks/${existing.id}`, { method: "PATCH", body: JSON.stringify(form) });
+      else await api("/api/v1/freezer/racks", { method: "POST", body: JSON.stringify({ ...form, freezer_id: freezerId, shelf_no: rack.shelf_no, position: rack.position }) });
+      onSaved(existing ? "架子已保存。" : "架子已放好。");
+    } catch (e) {
+      setError(errText(e));
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!existing || !window.confirm(`移除第 ${rack.shelf_no} 层 ${rack.position}号架？架子上不能还有盒子。`)) return;
+    try {
+      await api(`/api/v1/freezer/racks/${existing.id}`, { method: "DELETE" });
+      onSaved("架子已移除。");
+    } catch (e) {
+      setError(errText(e));
+    }
+  }
+
+  return (
+    <Dialog title={`第 ${rack.shelf_no} 层 · ${rack.position}号架${existing ? "" : "（放置新架子）"}`} onClose={onClose}>
+      <p className="muted">只有被分配的人能往这个架子里放盒子；改分配不会移动已有盒子。不确定每层放几盒时，可先按实际数一下再改。</p>
+      <div className="form-grid">
+        <label className="field">
+          分配给
+          <Combobox
+            value={form.owner_id}
+            allowEmpty
+            emptyLabel="暂不分配"
+            options={users.map((u) => ({ value: String(u.id), label: `${u.display_name}（${u.username}）` }))}
+            onChange={(v) => setForm({ ...form, owner_id: v })}
+          />
+        </label>
+        <label className="field">架内层数<input type="number" min={1} max={20} value={form.tiers} onChange={(e) => setForm({ ...form, tiers: e.target.value })} /></label>
+        <label className="field">每层盒位数<input type="number" min={1} max={20} value={form.depth} onChange={(e) => setForm({ ...form, depth: e.target.value })} /></label>
+        <label className="field wide">备注<input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></label>
+      </div>
+      {error && <div className="error">{error}</div>}
+      <div className="dialog-actions">
+        {existing && <button className="danger" style={{ marginRight: "auto" }} onClick={remove}>移除架子</button>}
+        <button onClick={onClose}>取消</button>
+        <button className="primary" onClick={save} disabled={busy}>保存</button>
       </div>
     </Dialog>
   );

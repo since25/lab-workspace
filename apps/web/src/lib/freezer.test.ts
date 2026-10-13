@@ -8,6 +8,11 @@ describe("formatLocation", () => {
       "-80 1号（-80℃） · 第2层 · 3号架 · 第4格 · 盒子「交付试剂」"
     );
   });
+  it("架子格位里的盒子：显示架内层与盒位，不显示旧格位", () => {
+    expect(formatLocation({ ...base, rack_no: 1, slot_no: 9, tier_no: 3, depth_no: 2, kind: "box", name: "DIS3" })).toBe(
+      "-80 1号（-80℃） · 第2层 · 1号架 · 架内第3层第2盒 · 盒子「DIS3」"
+    );
+  });
   it("框：不填架号格位", () => {
     expect(formatLocation({ ...base, kind: "basket", name: "大框A" })).toBe("-80 1号（-80℃） · 第2层 · 框「大框A」");
   });

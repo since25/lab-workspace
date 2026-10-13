@@ -127,3 +127,46 @@ td.code-col { max-width: 180px; word-break: normal; overflow-wrap: anywhere; }
 .seg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .seg button.active { background: var(--bg); color: var(--text); font-weight: 600; }
 .selbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: #fafaf9; }
+
+/* 细胞冻存：只剩 1 管的记录 */
+tr.low-stock td { background: var(--warn-bg); }
+tbody tr.low-stock:hover td { background: #fde68a; }
+
+/* 留言板 */
+textarea.prose { font-family: inherit; }
+.post.by-admin { border-left: 3px solid var(--primary); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-right: 6px; vertical-align: middle; }
+.badge { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 冰箱布局图 */
+.tag { display: inline-block; font-size: 11px; padding: 0 5px; margin-right: 4px; border-radius: 4px; background: #ccfbf1; color: var(--primary-hover); vertical-align: 1px; }
+.fshelf { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.fshelf:last-of-type { border-bottom: none; }
+.fshelf-label { font-weight: 600; padding-top: 8px; }
+.fshelf-racks { display: grid; gap: 8px; overflow-x: auto; }
+.rack-card { display: block; text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); cursor: pointer; min-height: 72px; font: inherit; color: var(--text); }
+.rack-card:hover { border-color: var(--muted); }
+.rack-card.mine { border-color: var(--primary); background: #f0fdfa; }
+.rack-card.selected { outline: 2px solid var(--primary); outline-offset: 1px; }
+.rack-card.empty { border-style: dashed; color: var(--muted); background: transparent; cursor: default; }
+button.rack-card.empty { cursor: pointer; }
+.rack-card:focus-visible { outline: 2px solid var(--primary); }
+.rack-head { display: flex; justify-content: space-between; gap: 8px; }
+.rack-owner { margin: 2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.usage { height: 4px; border-radius: 2px; background: var(--border-soft); overflow: hidden; }
+.usage span { display: block; height: 100%; background: var(--primary); }
+.loose { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.chip { min-height: 28px; padding: 2px 10px; border-radius: 14px; font-size: 13px; }
+.chip.selected { border-color: var(--primary); outline: 1px solid var(--primary); }
+.rack-grid-wrap { overflow-x: auto; margin-top: 12px; }
+.rack-grid { display: grid; gap: 6px; min-width: max-content; }
+.grid-head { font-size: 12px; align-self: center; white-space: nowrap; }
+.cell { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 52px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; text-align: left; }
+.cell.box { background: #ecfdf5; border-color: #6ee7b7; cursor: pointer; }
+.cell.box:hover { border-color: var(--primary); }
+.cell.box.selected { outline: 2px solid var(--primary); outline-offset: 1px; }
+.cell-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.cell.empty { border-style: dashed; background: transparent; color: var(--muted); align-items: center; }
+.cell.empty.can { cursor: pointer; }
+.cell.empty.can:hover { background: #f0fdfa; border-color: var(--primary); color: var(--primary); }
+.cell.empty.target { border-color: var(--primary); color: var(--primary); }

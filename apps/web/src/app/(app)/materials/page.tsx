@@ -29,7 +29,7 @@ interface Resp {
   total: number;
   page: number;
   page_size: number;
-  facets: { category: string[]; status: string[]; receipt: string[] };
+  facets: { category: string[]; status: string[]; receipt: string[]; brand: string[]; requester: string[] };
   last_import: { filename: string; created_at: string; accepted_count: number } | null;
 }
 
@@ -83,11 +83,11 @@ export default function MaterialsPage() {
         </label>
         <label className="field">
           品牌
-          <input placeholder="如 NEB" value={f.brand} onChange={upd("brand")} />
+          <Combobox value={f.brand} allowEmpty options={data?.facets.brand ?? []} onChange={pick("brand")} />
         </label>
         <label className="field">
           请购人
-          <input value={f.requester} onChange={upd("requester")} />
+          <Combobox value={f.requester} allowEmpty options={data?.facets.requester ?? []} onChange={pick("requester")} style={{ minWidth: 110 }} />
         </label>
         <label className="field">
           小类

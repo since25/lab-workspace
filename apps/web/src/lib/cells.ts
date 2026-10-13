@@ -33,6 +33,32 @@ export const CELL_LABELS: Record<string, string> = {
   needs_review: "待核对",
 };
 
+// 可下拉选择 / 筛选的文本字段：候选值取自台账中已有的值，新填的值保存后自动出现在候选里
+export const CELL_OPTION_FIELDS = ["cell_name", "source", "freezing_medium", "depositor"] as const;
+// 列表与导出共用的精确筛选参数 → 字段
+const EXACT_FILTERS = [["source", "source"], ["depositor", "depositor"], ["medium", "freezing_medium"]] as const;
+
+// 按查询参数拼列表/导出的 WHERE 条件（ids 只用于导出勾选的记录）
+export function cellFilter(sp: URLSearchParams): { where: string; params: unknown[] } {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  const add = (sql: string, v: unknown) => {
+    params.push(v);
+    where.push(sql.replaceAll("?", `$${params.length}`));
+  };
+  if (str(sp.get("rack"))) add("c.rack_no = ?", Number(sp.get("rack")));
+  if (str(sp.get("layer"))) add("c.layer_no = ?", Number(sp.get("layer")));
+  if (sp.get("review") === "1") where.push("c.needs_review");
+  for (const [param, col] of EXACT_FILTERS) {
+    if (str(sp.get(param))) add(`c.${col} = ?`, str(sp.get(param)));
+  }
+  const q = str(sp.get("q"));
+  if (q) add("(c.cell_name ILIKE ? OR c.source ILIKE ? OR c.depositor ILIKE ? OR c.remarks ILIKE ?)", `%${q}%`);
+  const ids = str(sp.get("ids")).split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length) add("c.id = ANY(?::int[])", ids);
+  return { where: where.length ? "WHERE " + where.join(" AND ") : "", params };
+}
+
 function int(v: unknown, label: string, min: number, max = Infinity): number {
   const n = Number(str(v));
   if (!str(v) || !Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${label}必须是 ${min}${max < Infinity ? `–${max}` : " 以上"}的整数`);

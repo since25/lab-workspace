@@ -37,13 +37,14 @@
 
 ## 资源库
 
-- `GET /cells`（支持按架号、层号、名称、存放人、待核对筛选）
+- `GET /cells`：`rack`、`layer`、`q`（名称/来源/存放人/备注模糊）、`source`、`depositor`、`medium`（冻存液；三者精确匹配）、`review=1`；同时返回 `options`（细胞名称、来源、冻存液、存放人的已有值，供下拉候选）
+- `GET /cells/export`：同列表的筛选参数，另可带 `ids=1,2,3` 只导出勾选的记录；返回 `.xlsx`
 - `POST /cells`
 - `PATCH /cells/:id`（含修改管数；写入修改历史）
 - `DELETE /cells/:id`（仅 admin）
 - `GET /cells/:id/history`
 - `POST /cells/import`：表单字段 `file`、`mode=preview|commit`；追加导入，跳过与现有记录完全相同的行
-- `GET /materials`：`q`、`brand`、`requester`（模糊匹配）、`category`、`status`、`receipt`、`sort`、`dir`、`page`
+- `GET /materials`：`q`、`brand`、`requester`、`category`、`status`、`receipt`（后五项精确匹配，候选值见返回的 `facets`）、`sort`、`dir`、`page`
 - `POST /materials/import`（仅 admin；`mode=preview|commit`；整表替换）
 - `GET /assets`：固定资产查询，`q`、`user`、`category`、`location`、`sort`、`dir`、`page`
 - `POST /assets/import`（仅 admin；`mode=preview|commit`；整表替换，只导入研发部）
@@ -54,16 +55,27 @@
 普通用户只能访问自己的容器和样品；管理员或有「冰箱总览」权限的成员在查询接口带 `scope=all`（可加 `owner=<用户 id>`）只读查看全部人员，修改接口对他们同样只作用于自己的数据。
 
 - `GET /freezer/freezers`：冰箱清单（停用的仅管理员可见）
-- `POST /freezer/freezers`、`PATCH /freezer/freezers/:id`、`DELETE /freezer/freezers/:id`：仅 admin；有容器的冰箱不能删除（`409`）
-- `GET /freezer/containers`：`scope`、`owner`、`temp`；返回位置与在库样品数
-- `POST /freezer/containers`：`{freezer_id, kind: box|basket, name, shelf_no, rack_no?, slot_no?, remarks?}`；同位置已有盒子时返回 `warning`
+- `POST /freezer/freezers`、`PATCH /freezer/freezers/:id`、`DELETE /freezer/freezers/:id`：仅 admin；可带布局 `shelf_count`、`racks_per_shelf`（同时填或都不填）；有容器或架子的冰箱不能删除、布局缩小会切掉架子/容器时 `409`
+- `GET /freezer/racks?freezer=`：该冰箱的架子（位置、分配人、规格、已用盒位数 `used`，不含内容），所有登录用户可看
+- `POST /freezer/racks`：`{freezer_id, shelf_no, position, owner_id?, tiers?, depth?, remarks?}`；`PATCH /freezer/racks/:id`：`{owner_id, tiers, depth, remarks}`；`DELETE /freezer/racks/:id`：均仅 admin
+- `GET /freezer/containers`：`scope`、`owner`、`freezer`；自己的视图含公共容器；返回位置与在库样品数
+- `POST /freezer/containers`：`{freezer_id, kind: box|basket, name, shelf_no, rack_no?, slot_no?, tier_no?, depth_no?, is_shared?（仅 admin）, remarks?}`；放进别人或未分配的架子 `403`，格位已有盒子 `409`；无布局冰箱同位置已有盒子时返回 `warning`
 - `PATCH /freezer/containers/:id`、`DELETE /freezer/containers/:id`（容器内有在库样品时 `409`）
-- `GET /freezer/samples`：`scope`、`owner`、`temp`、`status=stored|removed|all`（默认 stored）、`container`、`q`；同时返回各温度数量 `counts`
+- `GET /freezer/samples`：`scope`、`owner`、`freezer`、`status=stored|removed|all`（默认 stored）、`container`、`q`；同时返回各冰箱数量 `counts`（键为冰箱 id，另有 `all`）；`container` 为公共容器时返回其中所有人的样品
 - `POST /freezer/samples`：批量存入 `{container_id | new_container, stored_on?, samples:[{name, project_no, sample_type, remarks}]}`，最多 500 管
 - `PATCH /freezer/samples/:id`：修改样品信息；`DELETE /freezer/samples/:id`：删除录错记录
-- `GET /freezer/samples/:id/history`：流转历史（本人、admin 或有「冰箱总览」权限者）
+- `GET /freezer/samples/:id/history`：流转历史（本人、admin、有「冰箱总览」权限者；样品在公共容器里时所有人）
 - `GET /freezer/owners`：全部人员视图的存放人筛选项（admin 或有「冰箱总览」权限者）
 - `POST /freezer/samples/batch`：`{ids, action: remove|move, note?, container_id? | new_container?}`
+
+## 留言板
+
+- `GET /feedback?status=open|closed|all`：成员只返回自己的，admin 返回全部；每条带 `unread`
+- `POST /feedback`：`{title, body}`
+- `GET /feedback/:id`：详情与全部回复，同时标记已读；看不到的按 `404`
+- `POST /feedback/:id/posts`：`{body}`，发起人或 admin
+- `PATCH /feedback/:id`：`{status: open|closed}`，仅 admin
+- `GET /feedback/unread`：`{count}`，导航栏角标
 
 ## 管理
 

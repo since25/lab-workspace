@@ -1,35 +1,24 @@
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
-import { parseCellInput } from "@/lib/cells";
+import { CELL_OPTION_FIELDS, cellFilter, parseCellInput } from "@/lib/cells";
 import { query } from "@/lib/db";
-import { handle, ok, readJson, str } from "@/lib/http";
+import { handle, ok, readJson } from "@/lib/http";
 
 const LIST_SQL = `SELECT c.*, to_char(c.frozen_on, 'YYYY-MM-DD') AS frozen_on FROM cell_inventory c`;
 
 export const GET = handle(async (req: Request) => {
   await requireUser();
-  const sp = new URL(req.url).searchParams;
-  const where: string[] = [];
-  const params: unknown[] = [];
-  const add = (sql: string, v: unknown) => {
-    params.push(v);
-    where.push(sql.replace("?", `$${params.length}`));
-  };
-  if (str(sp.get("rack"))) add("c.rack_no = ?", Number(sp.get("rack")));
-  if (str(sp.get("layer"))) add("c.layer_no = ?", Number(sp.get("layer")));
-  if (sp.get("review") === "1") where.push("c.needs_review");
-  const q = str(sp.get("q"));
-  if (q) {
-    params.push(`%${q}%`);
-    const p = `$${params.length}`;
-    where.push(`(c.cell_name ILIKE ${p} OR c.source ILIKE ${p} OR c.depositor ILIKE ${p} OR c.remarks ILIKE ${p})`);
-  }
-  const sql = `${LIST_SQL} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY c.rack_no, c.layer_no, c.id LIMIT 2000`;
-  const cells = await query(sql, params);
+  const { where, params } = cellFilter(new URL(req.url).searchParams);
+  const cells = await query(`${LIST_SQL} ${where} ORDER BY c.rack_no, c.layer_no, c.id LIMIT 2000`, params);
   const [stats] = await query<{ total: string; review: string; racks: number[] }>(
     "SELECT count(*) AS total, count(*) FILTER (WHERE needs_review) AS review, coalesce(array_agg(DISTINCT rack_no ORDER BY rack_no), '{}') AS racks FROM cell_inventory"
   );
-  return ok({ cells, stats: { total: Number(stats.total), review: Number(stats.review), racks: stats.racks } });
+  // 下拉候选：台账里已有的值（去空、去重）
+  const optionRows = await query<{ col: string; v: string }>(
+    CELL_OPTION_FIELDS.map((f) => `SELECT DISTINCT '${f}' AS col, ${f} AS v FROM cell_inventory WHERE ${f} <> ''`).join(" UNION ") + " ORDER BY 1, 2"
+  );
+  const options = Object.fromEntries(CELL_OPTION_FIELDS.map((f) => [f, optionRows.filter((r) => r.col === f).map((r) => r.v)]));
+  return ok({ cells, stats: { total: Number(stats.total), review: Number(stats.review), racks: stats.racks }, options });
 });
 
 export const POST = handle(async (req: Request) => {

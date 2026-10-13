@@ -7,12 +7,18 @@ import { HttpError, handle, ok, readJson, str } from "@/lib/http";
 
 const MAX_BATCH = 500;
 
-// 样品列表：普通用户只看自己的，管理员 scope=all 只读查看全部（可按 owner 筛选）
-// status：stored（默认，在库）/ removed（已取出）/ all
+// 样品列表：普通用户只看自己的，管理员 scope=all 只读查看全部（可按 owner 筛选）。
+// 按公共容器筛选（container=公共框）时，所有人都能看到其中全部样品（只读，只有存放人能操作自己的）。
+// status：stored（默认，在库）/ removed（已取出）/ all；freezer：只看某台冰箱
 export const GET = handle(async (req: Request) => {
   const user = await requireUser();
   const sp = new URL(req.url).searchParams;
-  const owner = ownerFilter(user, sp);
+  let owner = ownerFilter(user, sp);
+  const containerId = Number(str(sp.get("container"))) || 0;
+  if (containerId && sp.get("scope") !== "all") {
+    const [ct] = await query<{ is_shared: boolean }>("SELECT is_shared FROM freezer_containers WHERE id = $1", [containerId]);
+    if (ct?.is_shared) owner = null;
+  }
   const base: string[] = [];
   const params: unknown[] = [];
   const add = (sql: string, v: unknown) => {
@@ -22,7 +28,7 @@ export const GET = handle(async (req: Request) => {
   if (owner !== null) add("s.owner_id = ?", owner);
   const status = str(sp.get("status")) || "stored";
   if (status !== "all") add("s.status = ?", status === "removed" ? "removed" : "stored");
-  if (str(sp.get("container"))) add("s.container_id = ?", Number(sp.get("container")) || 0);
+  if (str(sp.get("container"))) add("s.container_id = ?", containerId);
   const q = str(sp.get("q"));
   if (q) {
     add(
@@ -30,38 +36,39 @@ export const GET = handle(async (req: Request) => {
       `%${q}%`
     );
   }
-  // 各温度的数量（用于标签页），不受温度筛选影响
+  // 各冰箱的数量（用于标签页），不受冰箱筛选影响
   const from = `FROM freezer_samples s
     LEFT JOIN freezer_containers ct ON ct.id = s.container_id
     LEFT JOIN freezers f ON f.id = ct.freezer_id
     JOIN users u ON u.id = s.owner_id`;
   const baseWhere = base.length ? "WHERE " + base.join(" AND ") : "";
-  const countRows = await query<{ temperature: string | null; n: number }>(
-    `SELECT f.temperature, count(*)::int AS n ${from} ${baseWhere} GROUP BY f.temperature`,
+  const countRows = await query<{ freezer_id: number | null; n: number }>(
+    `SELECT f.id AS freezer_id, count(*)::int AS n ${from} ${baseWhere} GROUP BY f.id`,
     params
   );
-  const temp = str(sp.get("temp"));
-  if (temp) add("f.temperature = ?", temp);
+  const freezer = Number(str(sp.get("freezer")));
+  if (freezer) add("f.id = ?", freezer);
   const samples = await query(
     `SELECT s.id, s.owner_id, s.container_id, s.name, s.project_no, s.sample_type, s.remarks, s.status,
             to_char(s.stored_on, 'YYYY-MM-DD') AS stored_on, s.removed_at,
-            ct.kind, ct.name AS container_name, ct.shelf_no, ct.rack_no, ct.slot_no,
+            ct.kind, ct.name AS container_name, ct.shelf_no, ct.rack_no, ct.slot_no, ct.tier_no, ct.depth_no, ct.is_shared,
             f.name AS freezer_name, f.temperature, u.display_name AS owner_name
        ${from} ${base.length ? "WHERE " + base.join(" AND ") : ""}
-      ORDER BY f.temperature::int NULLS LAST, f.name, ct.shelf_no, ct.rack_no NULLS LAST, ct.slot_no NULLS LAST, ct.name, s.id
+      ORDER BY f.temperature::int NULLS LAST, f.name, ct.shelf_no, ct.rack_no NULLS LAST, ct.tier_no NULLS LAST, ct.depth_no NULLS LAST,
+               ct.slot_no NULLS LAST, ct.name, s.id
       LIMIT 2000`,
     params
   );
   const counts: Record<string, number> = { all: 0 };
   for (const r of countRows) {
     counts.all += r.n;
-    if (r.temperature) counts[r.temperature] = r.n;
+    if (r.freezer_id) counts[r.freezer_id] = r.n;
   }
   return ok({ samples, counts });
 });
 
 // 批量存入：{container_id | new_container, stored_on?, samples:[{name, project_no, sample_type, remarks}]}
-// 全部存到同一个容器；new_container 时在同一事务里先建容器
+// 全部存到同一个容器（自己的或公共的）；new_container 时在同一事务里先建容器
 export const POST = handle(async (req: Request) => {
   const user = await requireUser();
   const body = await readJson(req);

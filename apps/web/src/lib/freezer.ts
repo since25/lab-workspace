@@ -5,6 +5,8 @@ export type Temperature = (typeof TEMPERATURES)[number];
 export const tempLabel = (t: string) => `${t}℃`;
 
 export const KIND_LABELS: Record<string, string> = { box: "盒子", basket: "框" };
+// 界面上对「容器」的统称
+export const CONTAINER_WORD = "盒子/框";
 
 export const SAMPLE_LABELS: Record<string, string> = {
   name: "样品信息",
@@ -20,15 +22,22 @@ export interface ContainerPos {
   shelf_no: number;
   rack_no: number | null;
   slot_no: number | null;
+  tier_no?: number | null;
+  depth_no?: number | null;
   kind: string;
   name: string;
 }
 
-// 位置显示为一行：「-80 1号（-80℃） · 第2层 · 3号架 · 第4格 · 盒子「名称」」
+// 架子里的格位：「架内第3层第2盒」
+export const rackCellLabel = (tier: number, depth: number) => `架内第${tier}层第${depth}盒`;
+
+// 位置显示为一行：「-80 1号（-80℃） · 第2层 · 3号架 · 第4格 · 盒子「名称」」；
+// 放在架子格位里的盒子显示为「… · 3号架 · 架内第3层第2盒 · 盒子「名称」」
 export function formatLocation(c: ContainerPos): string {
   const parts = [`${c.freezer_name}（${tempLabel(c.temperature)}）`, `第${c.shelf_no}层`];
   if (c.rack_no) parts.push(`${c.rack_no}号架`);
-  if (c.slot_no) parts.push(`第${c.slot_no}格`);
+  if (c.tier_no && c.depth_no) parts.push(rackCellLabel(c.tier_no, c.depth_no));
+  else if (c.slot_no) parts.push(`第${c.slot_no}格`);
   parts.push(`${KIND_LABELS[c.kind] ?? c.kind}「${c.name}」`);
   return parts.join(" · ");
 }
