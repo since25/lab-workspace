@@ -1,3 +1,3 @@
-category,item_name,specification,catalog_no,unit,quantity,location,status,remarks
-消耗品,无菌离心管,15 mL,DEMO-001,包,12,Storage-A,active,脱敏示例
-试剂,缓冲液,通用规格,DEMO-002,瓶,6,Reagent-02,active,脱敏示例
+请购日期,请购人,任职部门,采购单编码,物料编码,状态,请购大类,请购小类,名称,品牌,规格型号,单位,数量,是否紧急,使用项目,备注,合同或订单编号,采购数量,最近收货日期,收货数量,收货状态
+2026-01-05,示例用户甲,示例部门,REQ-DEMO-0001,MAT-DEMO-0001,启用,采购类采购,耗材,无菌离心管,品牌A,15 mL,包,2,未勾选,PRJ-DEMO,,ORD-DEMO-0001,2,2026-01-12,2,全部收货
+2026-02-10,示例用户乙,示例部门,REQ-DEMO-0002,MAT-DEMO-0002,停用,采购类采购,生物试剂,示例缓冲液,品牌B,DEMO-500,瓶,1,勾选,PRJ-DEMO,脱敏示例,,0,,0,未收货

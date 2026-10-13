@@ -1,6 +1,9 @@
 .env
 .env.*
 !.env.example
+
+# macOS
+.DS_Store
 node_modules/
 .next/
 .Rproj.user/
@@ -17,3 +20,6 @@ tmp/
 *.fasta
 *.fa
 *.bam
+
+# R / Node 构建产物
+dist/

@@ -1,3 +1,4 @@
-cell_name,cell_type,source,passage,concentration,volume,location,freeze_date,status,remarks
-CELL-EXAMPLE-001,K562,source-A,18,2e6 cells/mL,1.0 mL,Freezer-A/Rack-01/Box-01,2026-01-15,available,脱敏示例
-CELL-EXAMPLE-002,HEK293T,source-B,12,1e6 cells/mL,1.5 mL,Freezer-B/Rack-02/Box-03,2026-02-20,used,脱敏示例
+架号,层数,细胞名称,来源,代次,细胞密度,冻存液,管数,存放人,放入时间
+1,一,CELL-DEMO-A,来源A,P3,2M,cell banker,12,示例用户甲,2026-01-15
+1,,CELL-DEMO-B,来源B,P5,1M,90% FBS + 10% DMSO,6,示例用户乙,2026-02-20
+2,三,CELL-DEMO-C,,,1-2M,cell banker,3/2/4管,示例用户甲,20250307

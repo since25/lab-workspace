@@ -1,35 +1,14 @@
+# 仅用于开发机本地起数据库；生产部署见 docs/deployment.md（windows-wg 原生安装，不用 Docker）
 services:
-  web:
-    build: ../apps/web
-    ports:
-      - "3000:3000"
-    env_file: .env
-    depends_on:
-      db:
-        condition: service_healthy
-      r-engine:
-        condition: service_started
-    volumes:
-      - temp_jobs:/var/lib/lab-workspace/jobs
-  r-engine:
-    build: ../apps/r-engine
-    expose:
-      - "8000"
-    volumes:
-      - temp_jobs:/var/lib/lab-workspace/jobs
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 volumes:
   pg_data:
-  temp_jobs:

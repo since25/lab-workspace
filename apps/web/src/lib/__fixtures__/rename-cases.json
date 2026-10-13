@@ -1,0 +1,42 @@
+[
+  {
+    "preset": "",
+    "pattern": "",
+    "replacement": "",
+    "tag": "",
+    "names": ["R1-9.IDUAR.3380632.G05100E04.H03.ab1", "R1-9.IDUAR.3380632.G06.H04.ab1", "12_P1_SAMPLE_A.ab1", "12_P1_SAMPLE_B.AB1", "3_P2_x_TSS1-2_A01.ab1", "样品甲_wt.ab1", "a.b.ab1", "plain.ab1", "plain_1.ab1", "Zeta.ab1", "alpha.ab1"],
+    "expected": ["R1-9.IDUAR.3380632.G05100E04.H03", "R1-9.IDUAR.3380632.G06.H04", "12_P1_SAMPLE_A", "12_P1_SAMPLE_B", "3_P2_x_TSS1-2_A01", "样品甲_wt", "a.b", "plain", "plain_1", "Zeta", "alpha"]
+  },
+  {
+    "preset": "combined_default",
+    "tag": "",
+    "names": ["R1-9.IDUAR.3380632.G05100E04.H03.ab1", "R1-9.IDUAR.3380632.G06.H04.ab1", "12_P1_SAMPLE_A.ab1", "12_P1_SAMPLE_B.AB1", "3_P2_x_TSS1-2_A01.ab1", "样品甲_wt.ab1", "a.b.ab1", "plain.ab1", "plain_1.ab1", "Zeta.ab1", "alpha.ab1"],
+    "expected": ["R1-9.IDUAR", "R1-9.IDUAR_dup1", "12_P1_SAMPLE_A", "12_P1_SAMPLE_B", "3_P2_x_TSS1-2_A01", "样品甲_wt", "a.b", "plain", "plain_1", "Zeta", "alpha"]
+  },
+  {
+    "preset": "strip_leading_index",
+    "tag": "批次 1",
+    "names": ["R1-9.IDUAR.3380632.G05100E04.H03.ab1", "R1-9.IDUAR.3380632.G06.H04.ab1", "12_P1_SAMPLE_A.ab1", "12_P1_SAMPLE_B.AB1", "3_P2_x_TSS1-2_A01.ab1", "样品甲_wt.ab1", "a.b.ab1", "plain.ab1", "plain_1.ab1", "Zeta.ab1", "alpha.ab1"],
+    "expected": ["R1-9.IDUAR.3380632.G05100E04.H03_1", "R1-9.IDUAR.3380632.G06.H04_1", "P1_SAMPLE_A_1", "P1_SAMPLE_B_1", "P2_x_TSS1-2_A01_1", "样品甲_wt_1", "a.b_1", "plain_1", "plain_1_1", "Zeta_1", "alpha_1"]
+  },
+  {
+    "preset": "keep_index_and_primer",
+    "tag": "run-2",
+    "names": ["R1-9.IDUAR.3380632.G05100E04.H03.ab1", "R1-9.IDUAR.3380632.G06.H04.ab1", "12_P1_SAMPLE_A.ab1", "12_P1_SAMPLE_B.AB1", "3_P2_x_TSS1-2_A01.ab1", "样品甲_wt.ab1", "a.b.ab1", "plain.ab1", "plain_1.ab1", "Zeta.ab1", "alpha.ab1"],
+    "expected": ["R1-9.IDUAR.3380632.G05100E04.H03_run-2", "R1-9.IDUAR.3380632.G06.H04_run-2", "12_P1_run-2", "12_P1_dup1_run-2", "3_P2_run-2", "样品甲_wt_run-2", "a.b_run-2", "plain_run-2", "plain_1_run-2", "Zeta_run-2", "alpha_run-2"]
+  },
+  {
+    "preset": "strip_tss_suffix",
+    "tag": "",
+    "names": ["R1-9.IDUAR.3380632.G05100E04.H03.ab1", "R1-9.IDUAR.3380632.G06.H04.ab1", "12_P1_SAMPLE_A.ab1", "12_P1_SAMPLE_B.AB1", "3_P2_x_TSS1-2_A01.ab1", "样品甲_wt.ab1", "a.b.ab1", "plain.ab1", "plain_1.ab1", "Zeta.ab1", "alpha.ab1"],
+    "expected": ["R1-9.IDUAR.3380632.G05100E04.H03", "R1-9.IDUAR.3380632.G06.H04", "12_P1_SAMPLE_A", "12_P1_SAMPLE_B", "3_P2_x", "样品甲_wt", "a.b", "plain", "plain_1", "Zeta", "alpha"]
+  },
+  {
+    "preset": "custom",
+    "pattern": "_(SAMPLE|wt)",
+    "replacement": "-\\1",
+    "tag": "",
+    "names": ["R1-9.IDUAR.3380632.G05100E04.H03.ab1", "R1-9.IDUAR.3380632.G06.H04.ab1", "12_P1_SAMPLE_A.ab1", "12_P1_SAMPLE_B.AB1", "3_P2_x_TSS1-2_A01.ab1", "样品甲_wt.ab1", "a.b.ab1", "plain.ab1", "plain_1.ab1", "Zeta.ab1", "alpha.ab1"],
+    "expected": ["R1-9.IDUAR.3380632.G05100E04.H03", "R1-9.IDUAR.3380632.G06.H04", "12_P1-SAMPLE_A", "12_P1-SAMPLE_B", "3_P2_x_TSS1-2_A01", "样品甲-wt", "a.b", "plain", "plain_1", "Zeta", "alpha"]
+  }
+]
