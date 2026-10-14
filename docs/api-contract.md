@@ -28,6 +28,7 @@
 - `POST /analysis/nanopore/upload?filename=`：请求体为厂商交付包 `.zip`，只解出 Sequences / Bam(`*.bam`) / Frequency_tables / Suspious_sites，返回 `{job, samples}`；分析结果 summary 末尾多 `Data_Source`（BAM / 频率表）与 `Data_Note`（频率表截断、空文件、与 BAM 不符等数据瑕疵）两列
 - `POST /analysis/nanopore/analyze`：`{job, rows:[{file, guide, target_position, target_base, edited_base, bystander_position?}]}`；同样入队返回 `202`
 - `GET /analysis/jobs/:id`：排队/运行状态 `{status: queued|running|done|failed|lost, position, wait_seconds, elapsed_seconds, estimate_seconds, remaining_seconds, queue_length, result?, error?}`
+  - 完成时 `result.celebrate = {n, mine}`：本次成功样品数、本人累计同类（Sanger/纳米孔）样品数，页面据此显示「恭喜完成」提示
 - `GET /analysis/jobs/:id/download`：结果 ZIP（Excel 汇总；Sanger 另含重命名后的 `.ab1`）
 - `DELETE /analysis/jobs/:id`：立即清理临时任务
 

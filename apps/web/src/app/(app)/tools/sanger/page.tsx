@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { api, download, errText } from "@/lib/client";
 import { RENAME_PRESETS, previewNames } from "@/lib/rename";
 import Combobox from "../../Combobox";
-import { BASES, GuidePicker, QueueBox, QueuePolicy, ResultTable, useAnalysisRunner } from "../shared";
+import { BASES, Celebrate, GuidePicker, QueueBox, QueuePolicy, ResultTable, useAnalysisRunner } from "../shared";
 
 interface FileRow {
   key: string;
@@ -235,6 +235,7 @@ export default function SangerPage() {
               </button>
             )}
           </div>
+          <Celebrate result={st.result} label="Sanger" />
           <ResultTable result={st.result} />
         </>
       )}

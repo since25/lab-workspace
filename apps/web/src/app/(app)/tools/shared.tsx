@@ -12,6 +12,7 @@ export interface AnalysisResult {
   n_files: unknown;
   n_success: unknown;
   elapsed_seconds?: unknown;
+  celebrate?: { n: number; mine: number }; // 网页服务附加：本次成功样品数、我累计的同类样品数
 }
 
 const first = (v: unknown) => (Array.isArray(v) ? v[0] : v);
@@ -57,6 +58,17 @@ export function ResultTable({ result }: { result: AnalysisResult }) {
         </div>
       )}
     </>
+  );
+}
+
+// 分析完成后的祝贺提示（只在有成功样品时显示）
+export function Celebrate({ result, label }: { result: AnalysisResult; label: string }) {
+  const c = result.celebrate;
+  if (!c || c.n <= 0) return null;
+  return (
+    <div className="notice celebrate" role="status">
+      🎉 恭喜完成 <strong>{c.n}</strong> 个样品的{label}分析！你累计已分析 {label} 样品 <strong>{c.mine}</strong> 个。
+    </div>
   );
 }
 

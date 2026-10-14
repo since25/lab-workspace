@@ -170,3 +170,7 @@ button.rack-card.empty { cursor: pointer; }
 .cell.empty.can { cursor: pointer; }
 .cell.empty.can:hover { background: #f0fdfa; border-color: var(--primary); color: var(--primary); }
 .cell.empty.target { border-color: var(--primary); color: var(--primary); }
+.notice.celebrate { background: #f0fdf4; border-color: #86efac; color: #166534; }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat-tile { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); }
+.stat-tile strong { font-size: 26px; font-variant-numeric: tabular-nums; }

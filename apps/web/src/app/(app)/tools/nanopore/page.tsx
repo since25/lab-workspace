@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { api, download, errText } from "@/lib/client";
 import Combobox from "../../Combobox";
-import { BASES, GuidePicker, QueueBox, QueuePolicy, ResultTable, useAnalysisRunner } from "../shared";
+import { BASES, Celebrate, GuidePicker, QueueBox, QueuePolicy, ResultTable, useAnalysisRunner } from "../shared";
 
 export default function NanoporePage() {
   const [job, setJob] = useState("");
@@ -162,6 +162,7 @@ export default function NanoporePage() {
               </button>
             )}
           </div>
+          <Celebrate result={st.result} label="纳米孔" />
           <ResultTable result={st.result} />
         </>
       )}

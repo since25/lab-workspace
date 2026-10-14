@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { analysisStats } from "@/lib/stats";
 
 export default async function Home() {
   const user = await getCurrentUser();
@@ -13,9 +14,25 @@ export default async function Home() {
             (SELECT count(*) FROM guides WHERE owner_id = $1) AS guides`,
     [user!.id]
   );
+  const a = await analysisStats(user!.id);
   return (
     <>
       <h1>你好，{user!.display_name}</h1>
+      {/* 分析看板：个人按 Sanger / 纳米孔分开计，全站只显示总数 */}
+      <div className="stat-tiles">
+        <div className="stat-tile">
+          <span className="muted">我分析的 Sanger 样品</span>
+          <strong>{a.sanger.toLocaleString()}</strong>
+        </div>
+        <div className="stat-tile">
+          <span className="muted">我分析的纳米孔样品</span>
+          <strong>{a.nanopore.toLocaleString()}</strong>
+        </div>
+        <div className="stat-tile">
+          <span className="muted">全站累计分析样品</span>
+          <strong>{a.total.toLocaleString()}</strong>
+        </div>
+      </div>
       <div className="table-wrap">
         <table>
           <tbody>

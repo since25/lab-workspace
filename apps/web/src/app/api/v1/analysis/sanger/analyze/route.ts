@@ -5,6 +5,7 @@ import { bystanderBaseError } from "@/lib/guides";
 import { HttpError, handle, ok, readJson, str } from "@/lib/http";
 import { activeTask, enqueue, view } from "@/lib/queue";
 import { ownJob, rCall, setJobStatus } from "@/lib/rengine";
+import { analysisStats } from "@/lib/stats";
 
 // Sanger 单序列分析：整批共用一条 guide。提交后进入全站队列，立即返回排队状态，
 // 页面再通过 GET /analysis/jobs/:id 轮询进度与结果。
@@ -66,7 +67,9 @@ export const POST = handle(async (req: Request) => {
       const result = data.data as Record<string, unknown>;
       await setJobStatus(job, "analyzed");
       await audit(user.id, "analysis.run", "analysis_job", job, { kind: "sanger", n_files: result.n_files, n_success: result.n_success }, req);
-      return { ok: true, result };
+      // 页面据此弹出「恭喜完成」提示：本次成功样品数 + 我累计的Sanger样品数
+      const celebrate = { n: Number([result.n_success].flat()[0]) || 0, mine: (await analysisStats(user.id)).sanger };
+      return { ok: true, result: { ...result, celebrate } };
     },
   });
   return ok({ job, ...view(job) }, 202);

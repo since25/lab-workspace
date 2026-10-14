@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { HttpError, handle, ok, readJson, str } from "@/lib/http";
 import { activeTask, enqueue, view } from "@/lib/queue";
 import { ownJob, rCall, setJobStatus } from "@/lib/rengine";
+import { analysisStats } from "@/lib/stats";
 
 // 纳米孔分析：rows = [{ file: 样本目录号, guide, target_position, target_base, edited_base }]
 // 与 Sanger 共用全站队列
@@ -31,7 +32,9 @@ export const POST = handle(async (req: Request) => {
       const result = data.data as Record<string, unknown>;
       await setJobStatus(job, "analyzed");
       await audit(user.id, "analysis.run", "analysis_job", job, { kind: "nanopore", n_files: result.n_files, n_success: result.n_success }, req);
-      return { ok: true, result };
+      // 页面据此弹出「恭喜完成」提示：本次成功样品数 + 我累计的纳米孔样品数
+      const celebrate = { n: Number([result.n_success].flat()[0]) || 0, mine: (await analysisStats(user.id)).nanopore };
+      return { ok: true, result: { ...result, celebrate } };
     },
   });
   return ok({ job, ...view(job) }, 202);
