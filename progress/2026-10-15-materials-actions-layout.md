@@ -17,3 +17,6 @@
 
 - Changed files：`apps/web/src/app/(app)/materials/page.tsx`、删除 `apps/web/src/lib/materials-copy.ts`、`apps/web/src/lib/materials-routes.test.ts`、`apps/web/scripts/check-materials-ui.mjs`、`docs/materials-update-plan.md`、本日志。未涉及数据库结构、增量规则或审批权限改动。
 - Rollback：如需恢复此前布局，可恢复本轮页面和复制功能相关文件以及对应说明/测试；部署前保存旧应用包，生产回滚路径和实际部署验证另行追加。未纳入其他未跟踪文件。
+- 部署验收追加：用户再次明确要求快速提交、推送和部署。实现提交 `f7659c7` 已推送并部署到 windows-wg，网页构建通过，安装包 VERSION 与服务器一致；ZIP CRC、配置排除扫描和上传 SHA-256 校验通过。HTTP 实际下载的新物料页 JS 与本地构建 SHA-256 完全一致，健康检查数据库和 R 均正常。
+- 上线前无排队或运行中的分析任务；部署前后物料全行摘要一致（3,016 条），`lab.env` 与 OA 计划任务定义均未变化。本轮一次性部署任务及临时检查文件已清理，部署日志保留在 `E:\lab-workspace\logs\deploy-materials-ui-20261015.log`。
+- Rollback 补充：旧版本 `4a350c3` 的应用包保存于 `C:\lab-workspace\incoming\app.prev-materials-ui-20261015_174416.zip`（7,444,601 字节）。本轮未新增迁移或数据变更，恢复该包并使用现有安装入口即可恢复原页面布局；OA 任务及受限配置保持现状。
