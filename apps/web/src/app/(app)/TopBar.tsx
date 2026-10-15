@@ -17,6 +17,7 @@ const LINKS = [
 ];
 const ADMIN_LINKS = [
   { href: "/admin/users", label: "账号管理" },
+  { href: "/admin/materials", label: "物料审批" },
   { href: "/admin/audit", label: "操作记录" },
 ];
 

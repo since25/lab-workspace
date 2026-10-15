@@ -36,12 +36,15 @@
 
 字段按采购系统「请购物料库」导出（第 3 行为表头）设计，定位为采购记录查询，不是实物库存：
 
-`id`, `requested_on`（请购日期）, `requester`（请购人）, `department`（任职部门）, `request_no`（采购单编码）, `material_code`（物料编码）, `status`（启用/停用）, `major_category`（请购大类）, `minor_category`（请购小类）, `item_name`, `brand`, `spec_model`（规格型号）, `unit`, `quantity`（请购数量）, `is_urgent`, `project_code`（使用项目）, `remarks`, `order_no`（合同或订单编号）, `purchased_qty`, `last_received_on`, `received_qty`, `receipt_status`, `import_batch_id`, `created_at`
+`id`, `requested_on`（请购日期）, `requester`（请购人）, `department`（任职部门）, `request_no`（采购单编码）, `material_code`（物料编码）, `status`（启用/停用）, `major_category`（请购大类）, `minor_category`（请购小类）, `item_name`, `brand`, `spec_model`（规格型号）, `unit`, `quantity`（请购数量）, `is_urgent`, `project_code`（使用项目）, `remarks`, `order_no`（合同或订单编号）, `purchased_qty`, `last_received_on`, `received_qty`, `receipt_status`, `import_batch_id`, `created_at`, `updated_at`, `is_used_up`, `used_up_at`, `used_up_by`, `used_up_requested_at`, `used_up_requested_by`
 
 - 不含存放位置和剩余库存。
-- 普通用户只读；admin 上传新导出文件后在一个事务内整表替换，导入失败时保留旧数据。
+- 采购字段仅由管理员导入或本机任务增量更新，按「采购单编码＋物料编码」唯一组合匹配；事务失败保留旧数据，源文件缺失的旧记录不删除。
 - 「停用」「未收货」记录照常导入，查询页提供状态筛选。
 - 导入时去除首尾空格（如 ` CS-206`）。
+- 一行代表一条采购记录，解析阶段不按名称或物料编码去重，同一物料多次采购全部保留。
+- 普通成员可二次确认后提交已用完申请，批准前仍显示；管理员可批量批准或驳回、直接标记和恢复。标记按采购记录全员共享，不被 OA 同步覆盖。
+- 后端保存全部部门，页面及审批查询只展示环境配置选定的部门，默认隐藏已用完记录，支持仅查看已用完。现有 10 个主展示列不增加。详见 `materials-update-plan.md`。
 
 ### fixed_assets
 

@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api, errText } from "@/lib/client";
+import { purchaseInfo } from "@/lib/materials-copy";
 import Combobox from "../Combobox";
 import ImportBox from "../ImportBox";
 import SortTh, { type Sort } from "../SortTh";
@@ -23,12 +25,16 @@ interface Item {
   receipt_status: string;
   last_received_on: string | null;
   received_qty: string | null;
+  is_used_up: boolean;
+  used_up_requested_at: string | null;
 }
 interface Resp {
   items: Item[];
   total: number;
   page: number;
   page_size: number;
+  departments: string[];
+  pending_count: number;
   facets: { category: string[]; status: string[]; receipt: string[]; brand: string[]; requester: string[] };
   last_import: { filename: string; created_at: string; accepted_count: number } | null;
 }
@@ -37,22 +43,27 @@ const num = (v: string | null) => (v === null ? "" : String(Number(v)));
 
 export default function MaterialsPage() {
   const [data, setData] = useState<Resp | null>(null);
-  const [f, setF] = useState({ q: "", brand: "", requester: "", category: "", status: "", receipt: "", page: 1 });
+  const [f, setF] = useState({ q: "", brand: "", requester: "", category: "", status: "", receipt: "", used_up: "", page: 1 });
   const [sort, setSort] = useState<Sort>({ key: "", dir: "asc" });
   const [isAdmin, setIsAdmin] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState<number | null>(null);
+  const [notice, setNotice] = useState("");
+  const [copyText, setCopyText] = useState("");
+  const [refresh, setRefresh] = useState(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal: AbortSignal) => {
     const sp = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== "").map(([k, v]) => [k, String(v)]));
     if (sort.key) {
       sp.set("sort", sort.key);
       sp.set("dir", sort.dir);
     }
     try {
-      setData(await api<Resp>(`/api/v1/materials?${sp}`));
+      setData(await api<Resp>(`/api/v1/materials?${sp}`, { signal }));
+      setError("");
     } catch (e) {
-      setError(errText(e));
+      if (!signal.aborted) setError(errText(e));
     }
   }, [f, sort]);
 
@@ -60,20 +71,46 @@ export default function MaterialsPage() {
     api<{ user: { role: string } }>("/api/v1/auth/me").then((d) => setIsAdmin(d.user.role === "admin"), () => {});
   }, []);
   useEffect(() => {
-    const t = setTimeout(load, 200);
-    return () => clearTimeout(t);
-  }, [load]);
+    const controller = new AbortController();
+    const t = setTimeout(() => load(controller.signal), 200);
+    return () => { clearTimeout(t); controller.abort(); };
+  }, [load, refresh]);
 
   const upd = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value, page: 1 });
   const pick = (k: string) => (v: string) => setF({ ...f, [k]: v, page: 1 });
   const th = (k: string, label: string) => <SortTh k={k} label={label} sort={sort} onSort={(x) => { setSort(x); setF({ ...f, page: 1 }); }} />;
   const pages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
+  async function changeUsage(m: Item, action: "mark" | "restore") {
+    if (!isAdmin && !window.confirm(`确认申请将「${m.item_name}」标记为已用完？管理员批准前仍会显示。`)) return;
+    setBusy(m.id);
+    setError("");
+    try {
+      const result = await api<{ pending: boolean; done: number }>(`/api/v1/materials/${m.id}/usage`, {
+        method: "POST", body: JSON.stringify({ action, confirmed: true }),
+      });
+      setNotice(result.done ? result.pending ? "已提交申请，等待管理员批准。" : action === "restore" ? "已恢复显示。" : "已标记为已用完。" : "该记录状态已变化，请查看刷新后的列表。");
+      setRefresh(v => v + 1);
+    } catch (e) { setError(errText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function copy(m: Item) {
+    const text = purchaseInfo(m);
+    try {
+      if (!navigator.clipboard) throw new Error();
+      await navigator.clipboard.writeText(text);
+      setCopyText("");
+      setNotice("已复制采购信息。");
+    } catch { setCopyText(text); }
+  }
+
   return (
     <>
       <h1>部门物料</h1>
       <p className="muted">
         数据来自采购系统「请购物料库」导出，用于查询买过什么、品牌货号、请购人和到货情况；不含存放位置和剩余库存。
+        {data && <> 展示部门：{data.departments.join("、") || "尚未设置，请联系管理员"}。</>}
         {data?.last_import && <> 最近更新：{new Date(data.last_import.created_at).toLocaleString("zh-CN")}（{data.last_import.accepted_count} 条）。</>}
       </p>
       <div className="toolbar">
@@ -101,22 +138,35 @@ export default function MaterialsPage() {
           收货
           <Combobox value={f.receipt} allowEmpty options={data?.facets.receipt ?? []} onChange={pick("receipt")} style={{ minWidth: 110 }} />
         </label>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="checkbox" style={{ minHeight: 0 }} checked={f.used_up === "1"}
+            onChange={(e) => { setF(prev => ({ ...prev, used_up: e.target.checked ? "1" : "", brand: "", requester: "", category: "", status: "", receipt: "", page: 1 })); setNotice(""); }} />
+          仅显示已用完物料
+        </label>
         <span className="spacer" />
-        {isAdmin && <button onClick={() => setShowImport(!showImport)}>导入采购导出（整表替换）</button>}
+        {isAdmin && <Link href="/admin/materials">已用完审批（{data?.pending_count ?? 0}）</Link>}
+        {isAdmin && <button onClick={() => setShowImport(!showImport)}>导入采购导出（增量更新）</button>}
       </div>
 
       {showImport && (
         <ImportBox
           endpoint="/api/v1/materials/import"
-          hint="上传采购系统「请购物料库」导出的 .xlsx。确认后会用新文件整体替换现有物料数据；导入失败时保留旧数据。"
-          confirmText="确认替换"
-          onDone={() => { setShowImport(false); load(); }}
+          hint="上传采购系统导出的 .xlsx 或 .csv。新增采购记录、更新已有采购信息，保留已用完标记及待审批申请；不会删除旧记录。"
+          confirmText="确认增量更新"
+          onDone={() => { setShowImport(false); setRefresh(v => v + 1); }}
           renderPreview={(d) => (
-            <p>解析到 {String(d.total)} 条采购记录，确认后将替换现有的 {data?.total ?? 0} 条。</p>
+            <p>解析到 {String(d.total)} 条采购记录，将按采购单编码和物料编码匹配，新增或更新；已用完标记和待审批申请保持不变。</p>
           )}
         />
       )}
       {error && <div className="error">{error}</div>}
+      {notice && <p role="status">{notice}</p>}
+      {copyText && <div className="panel">
+        <label className="field">采购信息（可选中后复制）
+          <textarea readOnly rows={7} value={copyText} autoFocus onFocus={e => e.target.select()} />
+        </label>
+        <button onClick={() => setCopyText("")}>关闭</button>
+      </div>}
 
       <div className="table-wrap">
         <table>
@@ -135,6 +185,12 @@ export default function MaterialsPage() {
                   {m.item_name}
                   {m.status !== "启用" && <> <span className="flag">{m.status}</span></>}
                   {m.remarks && <div className="muted">{m.remarks}</div>}
+                  {m.used_up_requested_at && !m.is_used_up && <div className="muted">已申请用完，待管理员批准</div>}
+                  <div className="actions">
+                    {m.is_used_up ? isAdmin && <button className="link" disabled={busy !== null} onClick={() => changeUsage(m, "restore")}>恢复显示</button>
+                      : (isAdmin || !m.used_up_requested_at) && <button className="link" disabled={busy !== null} onClick={() => changeUsage(m, "mark")}>{isAdmin ? "标记已用完" : "申请已用完"}</button>}
+                    <button className="link" onClick={() => copy(m)}>复制采购信息</button>
+                  </div>
                 </td>
                 <td className="brand-col">{m.brand}</td>
                 <td className="mono code-col">{m.spec_model}</td>
@@ -157,9 +213,9 @@ export default function MaterialsPage() {
       </div>
       {data && (
         <div className="pager">
-          <button disabled={f.page <= 1} onClick={() => setF({ ...f, page: f.page - 1 })}>上一页</button>
+          <button disabled={data.page <= 1} onClick={() => setF({ ...f, page: data.page - 1 })}>上一页</button>
           <span className="muted">第 {data.page} / {pages} 页，共 {data.total} 条</span>
-          <button disabled={f.page >= pages} onClick={() => setF({ ...f, page: f.page + 1 })}>下一页</button>
+          <button disabled={data.page >= pages} onClick={() => setF({ ...f, page: data.page + 1 })}>下一页</button>
         </div>
       )}
     </>

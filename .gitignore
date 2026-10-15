@@ -1,5 +1,6 @@
 .env
 .env.*
+*.env
 !.env.example
 
 # macOS
@@ -23,3 +24,6 @@ tmp/
 
 # R / Node 构建产物
 dist/
+
+# OA 自动导出的业务文件、运行日志与锁文件
+apps/oa-export/output/

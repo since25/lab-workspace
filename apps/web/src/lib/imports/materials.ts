@@ -72,7 +72,6 @@ export function parseMaterialWorkbook(sheets: { name: string; rows: Cell[][] }[]
 
   const rows: MaterialRow[] = [];
   const issues: ImportIssue[] = [];
-  const seen = new Set<string>();
   for (let i = hi + 1; i < sheet.rows.length; i++) {
     const r = sheet.rows[i];
     if (r.every((c) => text(c) === "")) continue;
@@ -87,11 +86,7 @@ export function parseMaterialWorkbook(sheets: { name: string; rows: Cell[][] }[]
       issues.push({ sheet: sheet.name, row: rowNo, message: "物料编码为空，未导入" });
       continue;
     }
-    if (seen.has(code)) {
-      issues.push({ sheet: sheet.name, row: rowNo, message: `物料编码 ${code} 重复，只保留第一条` });
-      continue;
-    }
-    seen.add(code);
+    // 一行是一条采购记录；同一物料编码可出现在不同采购单，不在解析阶段去重。
     rows.push({
       requested_on: parseLooseDate(rec.requested_on ?? null),
       requester: text(rec.requester),

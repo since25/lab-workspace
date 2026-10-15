@@ -45,8 +45,11 @@
 - `DELETE /cells/:id`（仅 admin）
 - `GET /cells/:id/history`
 - `POST /cells/import`：表单字段 `file`、`mode=preview|commit`；追加导入，跳过与现有记录完全相同的行
-- `GET /materials`：`q`、`brand`、`requester`、`category`、`status`、`receipt`（后五项精确匹配，候选值见返回的 `facets`）、`sort`、`dir`、`page`
-- `POST /materials/import`（仅 admin；`mode=preview|commit`；整表替换）
+- `GET /materials`：`q`、`brand`、`requester`、`category`、`status`、`receipt`（后五项精确匹配）、`used_up=1`（仅已用完；默认未用完）、`sort`、`dir`、`page`；列表、总数与 `facets` 均受展示部门及使用状态限制，另返回 `departments`、`pending_count`
+- `POST /materials/import`（仅 admin；`mode=preview|commit`；按采购单编码＋物料编码增量更新，保留本地标记；返回 `inserted/updated/unchanged`，不删除旧记录）
+- `POST /materials/:id/usage`：`{action:"mark",confirmed:true}`；普通成员提交待审批申请，管理员直接标记；`restore/approve/reject` 仅 admin，超出展示部门的记录不可操作
+- `GET /admin/materials/usage-requests?page=`：仅 admin，分页查询展示部门的未批准申请
+- `POST /admin/materials/usage-requests`：仅 admin，`{ids,action:"approve"|"reject"}`，单次最多 500 条；已变化的状态跳过，任一 ID 不存在或超出范围则整批拒绝
 - `GET /assets`：固定资产查询，`q`、`user`、`category`、`location`、`sort`、`dir`、`page`
 - `POST /assets/import`（仅 admin；`mode=preview|commit`；整表替换，只导入研发部）
 - `GET /imports/:id/errors`：未导入行清单 CSV

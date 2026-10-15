@@ -61,14 +61,31 @@ describe("parseCellWorkbook", () => {
 describe("parseMaterialWorkbook", () => {
   const header = ["请购日期", "请购人", "任职部门", "采购单编码", "物料编码", "状态", "请购大类", "请购小类", "名称", "品牌", "规格型号", "单位", "数量", "是否紧急", "使用项目", "备注", "合同或订单编号", "采购数量", "最近收货日期", "收货数量", "收货状态"];
   const row = (code: string) => ["2026-01-05", "甲", "示例部门", "REQ-1", code, "启用", "采购类采购", "耗材", " 离心管 ", "品牌A", "15 mL", "包", 2, "勾选", " PRJ-1", "", "ORD-1", 2, "2026-01-12", 2, "全部收货"];
-  it("跳过标题行、去空格、去重", () => {
+  it("跳过标题行、去空格，保留每条采购记录", () => {
     const { rows, issues, fatal } = parseMaterialWorkbook([
       { name: "部门物料", rows: [["部门物料"], ["数据源：示例"], header, row("M-1"), row("M-1"), row("")] },
     ]);
     expect(fatal).toBeNull();
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ material_code: "M-1", item_name: "离心管", project_code: "PRJ-1", is_urgent: true, quantity: 2, requested_on: "2026-01-05" });
-    expect(issues.map((i) => i.row)).toEqual([5, 6]);
+    expect(issues.map((i) => i.row)).toEqual([6]);
+  });
+  it("同一物料编码出现在不同采购单时全部保留", () => {
+    const first = row("M-1");
+    const second = row("M-1");
+    second[3] = "REQ-2";
+    const parsed = parseMaterialWorkbook([{ name: "部门物料", rows: [header, first, second] }]);
+    expect(parsed.rows.map(r => r.request_no)).toEqual(["REQ-1", "REQ-2"]);
+    expect(parsed.issues).toEqual([]);
+  });
+  it("同名不同编码不合并，不按部门筛掉记录", () => {
+    const first = row("M-1");
+    const second = row("M-2");
+    second[2] = "示例另一部门";
+    const parsed = parseMaterialWorkbook([{ name: "部门物料", rows: [header, first, second] }]);
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows.map(r => r.material_code)).toEqual(["M-1", "M-2"]);
+    expect(parsed.rows.map(r => r.department)).toEqual(["示例部门", "示例另一部门"]);
   });
   it("不是采购导出时整份拒绝", () => {
     expect(parseMaterialWorkbook([{ name: "x", rows: [["a", "b"]] }]).fatal).toContain("物料编码");

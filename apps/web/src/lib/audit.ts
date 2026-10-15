@@ -10,7 +10,7 @@ export async function audit(
   resourceId: string | number = "",
   metadata: Record<string, unknown> = {},
   req?: Request,
-  client?: PoolClient
+  client?: Pick<PoolClient, "query">
 ) {
   const ip = req?.headers.get("x-forwarded-for")?.split(",")[0].trim() || "";
   const ipHash = ip ? createHash("sha256").update(ip + (process.env.SESSION_SECRET || "")).digest("hex").slice(0, 16) : "";
