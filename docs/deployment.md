@@ -79,4 +79,4 @@ bash infra/windows/build-bundle.sh
 
 ## 10. OA 部门物料导出（独立部署）
 
-OA 流程使用单独的程序目录和每周六计划任务，每次重新登录后通过网页下载，按配置增量写入部门物料库，保留本地已用完及待审批状态。此功能当前仅完成本地实现和隔离验证，尚未部署。未来须先执行迁移 `009_material_usage.sql` 并部署新网页，再设置 `MATERIAL_DISPLAY_DEPARTMENTS_JSON` 和 OA 入库配置；不可直接启用旧的整表替换逻辑。详见 [`materials-update-plan.md`](materials-update-plan.md) 与 [`oa-material-export.md`](oa-material-export.md)。
+OA 流程使用单独的程序目录和每周六计划任务，每次重新登录后通过网页下载，按配置增量写入部门物料库，保留本地已用完及待审批状态。2026-10-15 已部署新网页、执行迁移 `009_material_usage.sql`、配置两个展示部门并启用增量入库。任务 `LabWorkspace-OA-Export` 每周六北京时间 03:00 执行，使用安装时的现有管理员账号 S4U 无密码登录；该机 Edge 无法在 SYSTEM 下启动。`lab.env` 的部门 JSON 必须使用无外层引号的单行 ASCII（中文用 `\uXXXX` 转义），以兼容 PowerShell 5.1 的读取方式。不可启用旧的整表替换逻辑。详见 [`materials-update-plan.md`](materials-update-plan.md) 与 [`oa-material-export.md`](oa-material-export.md)。

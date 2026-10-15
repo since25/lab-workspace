@@ -2,7 +2,7 @@
 
 目标是替代手动登录和点击导出。独立程序每次创建临时浏览器、用账号密码登录 OA，经「采购管理 → 部门物料」进入报表，在两层 iframe 内点击「导出」。不调用 OA API，不保存 cookie、storageState 或固定浏览器用户目录。
 
-已确认每周六运行一次，目标为 windows-wg，服务器时间 03:00（China Standard Time，UTC+8）。程序已支持下载后增量入库，保留全部部门的 21 个业务字段及本地已用完、待审批状态。当前仅本地实现和隔离测试，尚未部署或启用任务；记录匹配和审批规则见 `materials-update-plan.md`。
+已确认每周六运行一次，目标为 windows-wg，服务器时间 03:00（China Standard Time，UTC+8）。程序已支持下载后增量入库，保留全部部门的 21 个业务字段及本地已用完、待审批状态。2026-10-15 已部署并完成真实计划任务导出、入库验收；记录匹配和审批规则见 `materials-update-plan.md`。
 
 ## 配置与本地运行
 
@@ -32,12 +32,12 @@ npm test --prefix apps/oa-export
 
 ## Windows 独立部署
 
-导出与任务有独立安装包；启用增量入库前，需要先部署新网页、执行迁移并配置展示部门。此处只是未来部署步骤，本轮不执行；上传并安装前须确认目标、时间、配置、备份及回滚步骤。
+导出与任务有独立安装包；启用增量入库前，需要先部署新网页、执行迁移并配置展示部门。当前已完成部署；以下保留安装与验收步骤。升级或更换任务身份前须核对目标、配置、备份及回滚步骤。
 
 1. 本机先安装 `apps/web` 开发依赖，再执行 `bash infra/windows/build-oa-export.sh`，输出 `dist/oa-export.zip`。打包源码、固定依赖、运行入口和编译后的 `import-materials.mjs`；不包含 env、业务文件或测试数据库。
 2. 把包放到 `C:\lab-workspace\incoming\oa-export.zip`，将安装脚本 `infra/windows/install-oa-export.ps1` 单独上传。准备受限的 `C:\lab-workspace\config\oa.env`，使用服务器输出路径与 Edge channel。
 3. 管理员运行 `powershell -NoProfile -ExecutionPolicy Bypass -File <安装脚本路径>`。安装到 `C:\lab-workspace\automation\oa-export`，输出到 `E:\lab-workspace\oa-materials`；存在同名任务或程序目录时拒绝覆盖。安装脚本不读取或修改 `lab.env`，不改网络、防火墙、数据库或现有任务。
-4. 注册 `LabWorkspace-OA-Export`：SYSTEM 身份，每周六 03:00，单次最多 10 分钟，禁止任务重叠，不设置失败重试。错过运行时间时等待下个周六，暂无额外通知渠道。
+4. 注册 `LabWorkspace-OA-Export`：安装脚本执行者的现有管理员账号，S4U 无密码登录、最高权限，每周六 03:00，单次最多 10 分钟，禁止任务重叠，不设置失败重试。不要求账号保持交互登录，也不保存 Windows 密码。该机实测 Edge 在 SYSTEM 下启动即以 1002 退出，现有管理员 S4U 下可完成全流程；因此不使用 SYSTEM 运行浏览器。任务账号须保留管理员权限以读取受限配置和输出。错过运行时间时等待下个周六，暂无额外通知渠道。
 5. 首次手动 `Start-ScheduledTask -TaskName LabWorkspace-OA-Export`。任务结束后检查 `Get-ScheduledTaskInfo -TaskName LabWorkspace-OA-Export` 的 `LastTaskResult=0`、`NextRunTime`，核对输出文件非空且 XLSX 结构可读，并核对入库计数、部门展示、原标记及申请仍保留。日志为 `E:\lab-workspace\logs\oa-export.log` 和输出目录 `runs.jsonl`。
 
 ## 停用与回滚

@@ -27,7 +27,9 @@ if ($LASTEXITCODE -ne 0) { throw 'OA config validation failed; scheduled task wa
 $Action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' `
   -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Target\run.ps1`"" -WorkingDirectory $Target
 $Trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 -DaysOfWeek Saturday -At '03:00'
-$Principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+# 该机 Edge 在 SYSTEM 下退出码为 1002；使用执行安装的现有管理员账号。
+# S4U 不保存 Windows 密码，也不要求账号保持交互登录；OA 仍每次用配置账号登录。
+$Principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType S4U -RunLevel Highest
 $Settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
   -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings `
