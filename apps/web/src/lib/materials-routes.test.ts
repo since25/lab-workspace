@@ -8,7 +8,6 @@ import { GET as getMaterials } from "../app/api/v1/materials/route";
 import { POST as usage } from "../app/api/v1/materials/[id]/usage/route";
 import { GET as getQueue, POST as reviewQueue } from "../app/api/v1/admin/materials/usage-requests/route";
 import { POST as importMaterials } from "../app/api/v1/materials/import/route";
-import { purchaseInfo } from "./materials-copy";
 
 const context = { params: Promise.resolve({ id: "1" }) };
 const request = (body: unknown) => new Request("http://localhost/api/v1/materials/1/usage", { method: "POST", body: JSON.stringify(body) });
@@ -50,9 +49,5 @@ describe("物料入口权限", () => {
       expect(await response.text()).not.toContain("example-private-database-value");
       expect(logger).toHaveBeenCalledWith("物料操作失败");
     } finally { logger.mockRestore(); }
-  });
-  it("复制内容只包含再次采购需要的信息，不带已用完或审批状态", () => {
-    expect(purchaseInfo({ item_name: "示例耗材", brand: "示例品牌", spec_model: "EXAMPLE", unit: "盒", quantity: 2, project_code: "EXAMPLE-PRJ", remarks: "" }))
-      .toBe("名称：示例耗材\n品牌：示例品牌\n规格型号：EXAMPLE\n单位：盒\n数量：2\n使用项目：EXAMPLE-PRJ\n备注：");
   });
 });

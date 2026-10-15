@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, errText } from "@/lib/client";
-import { purchaseInfo } from "@/lib/materials-copy";
 import Combobox from "../Combobox";
 import ImportBox from "../ImportBox";
 import SortTh, { type Sort } from "../SortTh";
@@ -50,7 +49,6 @@ export default function MaterialsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
-  const [copyText, setCopyText] = useState("");
   const [refresh, setRefresh] = useState(0);
 
   const load = useCallback(async (signal: AbortSignal) => {
@@ -93,16 +91,6 @@ export default function MaterialsPage() {
       setRefresh(v => v + 1);
     } catch (e) { setError(errText(e)); }
     finally { setBusy(null); }
-  }
-
-  async function copy(m: Item) {
-    const text = purchaseInfo(m);
-    try {
-      if (!navigator.clipboard) throw new Error();
-      await navigator.clipboard.writeText(text);
-      setCopyText("");
-      setNotice("已复制采购信息。");
-    } catch { setCopyText(text); }
   }
 
   return (
@@ -161,12 +149,6 @@ export default function MaterialsPage() {
       )}
       {error && <div className="error">{error}</div>}
       {notice && <p role="status">{notice}</p>}
-      {copyText && <div className="panel">
-        <label className="field">采购信息（可选中后复制）
-          <textarea readOnly rows={7} value={copyText} autoFocus onFocus={e => e.target.select()} />
-        </label>
-        <button onClick={() => setCopyText("")}>关闭</button>
-      </div>}
 
       <div className="table-wrap">
         <table>
@@ -185,12 +167,6 @@ export default function MaterialsPage() {
                   {m.item_name}
                   {m.status !== "启用" && <> <span className="flag">{m.status}</span></>}
                   {m.remarks && <div className="muted">{m.remarks}</div>}
-                  {m.used_up_requested_at && !m.is_used_up && <div className="muted">已申请用完，待管理员批准</div>}
-                  <div className="actions">
-                    {m.is_used_up ? isAdmin && <button className="link" disabled={busy !== null} onClick={() => changeUsage(m, "restore")}>恢复显示</button>
-                      : (isAdmin || !m.used_up_requested_at) && <button className="link" disabled={busy !== null} onClick={() => changeUsage(m, "mark")}>{isAdmin ? "标记已用完" : "申请已用完"}</button>}
-                    <button className="link" onClick={() => copy(m)}>复制采购信息</button>
-                  </div>
                 </td>
                 <td className="brand-col">{m.brand}</td>
                 <td className="mono code-col">{m.spec_model}</td>
@@ -202,7 +178,14 @@ export default function MaterialsPage() {
                   {m.receipt_status}
                   {m.last_received_on && <div className="muted">{m.last_received_on}</div>}
                 </td>
-                <td className="mono nw">{m.material_code}</td>
+                <td className="nw">
+                  <div className="mono">{m.material_code}</div>
+                  <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                    {m.used_up_requested_at && !m.is_used_up && <div>已申请用完，待管理员批准</div>}
+                    {m.is_used_up ? isAdmin && <button className="link" style={{ color: "inherit", padding: 0 }} disabled={busy !== null} onClick={() => changeUsage(m, "restore")}>恢复显示</button>
+                      : (isAdmin || !m.used_up_requested_at) && <button className="link" style={{ color: "inherit", padding: 0 }} disabled={busy !== null} onClick={() => changeUsage(m, "mark")}>{isAdmin ? "标记已用完" : "申请已用完"}</button>}
+                  </div>
+                </td>
               </tr>
             ))}
             {data && !data.items.length && (
