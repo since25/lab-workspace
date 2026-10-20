@@ -48,6 +48,7 @@ export default function MaterialRequestsPage() {
     <p className="muted">普通成员提交的申请在批准前仍显示于物料清单；批准后默认隐藏，管理员可在已用完列表恢复。</p>
     <div className="toolbar">
       <Link href="/materials">返回部门物料</Link>
+      <Link href="/admin/materials/reconcile">库存校对请求</Link>
       <span className="spacer" />
       <button className="primary" disabled={!selected.length || busy} onClick={() => review("approve")}>批准所选（{selected.length}）</button>
       <button disabled={!selected.length || busy} onClick={() => review("reject")}>驳回所选</button>

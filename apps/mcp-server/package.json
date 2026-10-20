@@ -1,0 +1,17 @@
+{
+  "name": "lab-workspace-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP tools for Lab Workspace consumable reconciliation",
+  "bin": { "lab-workspace-mcp": "src/index.mjs" },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.7"
+  }
+}

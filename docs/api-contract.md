@@ -50,6 +50,19 @@
 - `POST /materials/:id/usage`：`{action:"mark",confirmed:true}`；普通成员提交待审批申请，管理员直接标记；`restore/approve/reject` 仅 admin，超出展示部门的记录不可操作
 - `GET /admin/materials/usage-requests?page=`：仅 admin，分页查询展示部门的未批准申请
 - `POST /admin/materials/usage-requests`：仅 admin，`{ids,action:"approve"|"reject"}`，单次最多 500 条；已变化的状态跳过，任一 ID 不存在或超出范围则整批拒绝
+- `GET /materials/stock`：常用耗材库存列表，所有登录用户；`category`（配置中的类别）、`q`（名称/品牌/规格/备注）、`status=unchecked|out|low|ok|stale`；返回 `categories`（含空类别的条目数/待核对/已用完/偏低/待复核）、`items`、`summary`、`stale_days`。未核对条目 `last_checked_at=null`，不计入已用完/偏低；`status=out` 表示数量为 0（已用完）
+- `POST /materials/stock`：仅 admin，新增条目 `{category,item_name,brand?,spec_model?,unit?,quantity?,safety_stock?,note?}`；`quantity` 省略表示待核对；同名同品牌同规格重复返回 409
+- `PATCH /materials/stock/:id`：仅 admin，修改类别/名称/品牌/规格/单位/安全库存/备注；传 `quantity` 返回 400（数量须走核对）
+- `DELETE /materials/stock/:id`：仅 admin，删除条目及核对历史，审计写快照
+- `POST /materials/stock/:id/check`：仅 admin，`{quantity,note?,expected_revision?}`；`revision` 不一致返回 409，成功写入核对历史并递增版本
+- `GET /materials/stock/:id/checks?limit=10`：所有登录用户，最近核对历史（最多 50 条）
+- `POST /materials/stock/sync`：仅 admin，从展示部门的启用采购记录按类别关键词生成缺失条目（数量 0、待核对）；返回 `{scanned,candidates,created,skipped}`，不改已有条目
+- `GET /materials/reconcile/search?q=&months=2`：所有登录用户；按名称/品牌/规格（同时比较去空格文本）返回匹配的库存条目、最多 500 条采购记录、近 N 月 `recent/unreceived/partial` 标记、`suggested_material_ids`、`pending_material_ids`、`departments` 和 `summary.truncated`。只读，供 agent 核对
+- `POST /materials/reconcile`：所有登录用户，`{stock_id?,proposed_quantity?,material_ids?,note,confirmed:true}`；创建待审批请求，不立即改库存或采购标记。`stock_id` 与 `material_ids` 至少一个；库存已有待审批请求时 `409`
+- `GET /materials/reconcile?status=all|pending|approved|rejected&page=`：成员只看自己，admin 看全部；返回 `materials` 明细、`stock_changed`（提交后库存 revision 变化）
+- `GET /materials/reconcile/:id`：本人或 admin；其他账号按 `404`
+- `GET /admin/materials/reconcile?status=pending&page=`：仅 admin，审批队列
+- `POST /admin/materials/reconcile`：仅 admin，`{ids,action:"approve"|"reject",note?}`；批准时事务内更新库存、写核对历史、标记采购记录为已用完并清理待审批申请；提交后库存 revision 变化或采购记录不存在时整批 `409`，需驳回重提
 - `GET /assets`：固定资产查询，`q`、`user`、`category`、`location`、`sort`、`dir`、`page`
 - `POST /assets/import`（仅 admin；`mode=preview|commit`；整表替换，只导入研发部）
 - `GET /imports/:id/errors`：未导入行清单 CSV

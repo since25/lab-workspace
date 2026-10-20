@@ -46,6 +46,37 @@
 - 普通成员可二次确认后提交已用完申请，批准前仍显示；管理员可批量批准或驳回、直接标记和恢复。标记按采购记录全员共享，不被 OA 同步覆盖。
 - 后端保存全部部门，页面及审批查询只展示环境配置选定的部门，默认隐藏已用完记录，支持仅查看已用完。现有 10 个主展示列不增加。详见 `materials-update-plan.md`。
 
+### consumable_stock / consumable_stock_checks（常用耗材库存）
+
+与 `material_items` 分表保存的实物库存，迁移 `011_consumable_stock.sql`。一行 `consumable_stock` 是一个可盘点的耗材条目（同一类别＋名称＋品牌＋规格），不是采购记录。
+
+`consumable_stock`：`id`, `category`（配置中的类别名）, `item_name`, `brand`, `spec_model`, `unit`, `quantity`（当前数量，`numeric(12,2)`，≥0）, `safety_stock`（安全库存，≥0）, `note`, `last_checked_at`（最近核对时间，空 = 从未核对）, `last_checked_by -> users.id`, `revision`（乐观锁版本）, `created_by`, `updated_by`, `created_at`, `updated_at`；`(category, item_name, brand, spec_model)` 唯一。
+
+`consumable_stock_checks`：`id`, `stock_id -> consumable_stock.id`（删除级联）, `before_qty`, `after_qty`, `note`, `checked_by -> users.id`, `checked_at`。每次核对追加一条，不覆盖历史。
+
+规则：
+
+- 数量只由「核对」改变；新增时可带初始数量（同时写一条「建立库存」），不带则 `last_checked_at` 为空、页面显示「待核对」。
+- 从未核对的条目不当作 0，不计入缺货/偏低；已核对且 `quantity <= 0` 为已用完（接口状态 `out`），`safety_stock > 0` 且 `quantity <= safety_stock` 为偏低；超过 30 天未核对提示待复核；超过 30 天未核对提示待复核。
+- 类别由 `MATERIAL_STOCK_CATEGORIES_JSON` 配置，默认吸头/细胞培养板/移液管/离心管/培养基；关键词只用于从采购记录生成候选。
+- 查询和核对历史所有登录用户可看；新增/编辑/删除/核对/生成候选仅 admin，与物料维护边界一致。
+- 核对使用 `revision` 乐观锁，旧版本提交返回 409；创建/修改/核对/删除/同步写 `audit_logs`，不写采购明细。
+- 详见 `consumable-stock.md`，选型依据见 `material-inventory-research.md`。
+
+### stock_reconcile_requests（库存校对请求）
+
+成员或 agent 提交、管理员批准的库存校对，迁移 `012_stock_reconcile.sql`。一条请求可同时包含一个库存条目数量和若干采购记录。
+
+`id`, `stock_id -> consumable_stock.id`（删除置空）, `stock_label`（提交时快照）, `stock_before`, `stock_revision`（提交时乐观锁版本）, `proposed_quantity`（可空 = 不改数量；0 = 用完）, `material_ids integer[]`（待标记为已用完的采购记录）, `note`, `status`（`pending`/`approved`/`rejected`）, `requested_by -> users.id`, `requested_at`, `reviewed_by -> users.id`, `reviewed_at`, `review_note`。
+
+规则：
+
+- 提交只写请求，不改库存和采购记录；`confirmed` 必须为 true，说明必填。
+- 同一库存条目同时只允许一条待审批请求（部分唯一索引），避免两个数量提议互相覆盖。
+- 管理员批准时在事务内锁定库存和请求：库存 revision 与提交时不一致返回 409，整批不生效；采购记录不存在同样 409。成功后更新库存、写 `consumable_stock_checks`、把采购记录设为 `is_used_up` 并清除待审批申请字段。
+- 驳回只改请求状态；审计记录提交/批准/驳回，不写密码或采购明细。
+- API 与 agent 用法见 `agent-mcp.md`。
+
 ### fixed_assets
 
 `id`, `asset_name`, `spec_model`, `category`, `quantity`, `location`, `department`, `user_name`, `import_batch_id`, `created_at`

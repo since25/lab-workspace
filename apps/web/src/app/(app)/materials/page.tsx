@@ -98,6 +98,7 @@ export default function MaterialsPage() {
       <h1>部门物料</h1>
       <p className="muted">
         数据来自采购系统「请购物料库」导出，用于查询买过什么、品牌货号、请购人和到货情况；不含存放位置和剩余库存。
+        剩余库存与核对见顶部「常用耗材」选项卡。
         {data && <> 展示部门：{data.departments.join("、") || "尚未设置，请联系管理员"}。</>}
         {data?.last_import && <> 最近更新：{new Date(data.last_import.created_at).toLocaleString("zh-CN")}（{data.last_import.accepted_count} 条）。</>}
       </p>

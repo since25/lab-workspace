@@ -6,6 +6,8 @@
 
 2026-10-15 用户确认提交、推送和部署后，已在 windows-wg 部署网页、迁移数据库并启用每周 OA 增量同步。升级前已备份数据库、应用包和配置，原有记录身份保留。部署证据和回滚路径见 `../progress/2026-10-15-materials-oa-deploy.md`。
 
+2026-10-20 增补：常用耗材的实物库存单独放在顶部「常用耗材」选项卡，与采购记录分表（`consumable_stock` / `consumable_stock_checks`），OA 增量同步不覆盖库存；类别由 `MATERIAL_STOCK_CATEGORIES_JSON` 配置。成员或 agent 可提交「库存校对请求」（`stock_reconcile_requests`），管理员批准后同时改库存和采购标记。设计与操作见 [`consumable-stock.md`](consumable-stock.md)，agent 接入见 [`agent-mcp.md`](agent-mcp.md)，采购周期与开源选型调研见 [`material-inventory-research.md`](material-inventory-research.md)。
+
 ## 采购记录身份
 
 一行代表一条采购记录，不按名称或单独物料编码去重。历史代码未记载单独物料编码去重的业务依据，该逻辑已移除。

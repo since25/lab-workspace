@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/cells", label: "细胞冻存" },
   { href: "/freezer", label: "冰箱管理" },
   { href: "/materials", label: "部门物料" },
+  { href: "/materials/stock", label: "常用耗材" },
   { href: "/assets", label: "固定资产" },
   { href: "/guides", label: "我的 Guide" },
   { href: "/tools/sanger", label: "Sanger 分析" },
@@ -18,12 +19,17 @@ const LINKS = [
 const ADMIN_LINKS = [
   { href: "/admin/users", label: "账号管理" },
   { href: "/admin/materials", label: "物料审批" },
+  { href: "/admin/materials/reconcile", label: "库存校对" },
   { href: "/admin/audit", label: "操作记录" },
 ];
 
 export default function TopBar({ user }: { user: SessionUser }) {
   const path = usePathname();
   const links = user.role === "admin" ? [...LINKS, ...ADMIN_LINKS] : LINKS;
+  // 取最长前缀，避免 /materials 与 /materials/stock 同时高亮。
+  const activeHref = links
+    .filter((l) => path === l.href || path.startsWith(`${l.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
   const [unread, setUnread] = useState(0);
 
   // 留言板角标：切换页面时、以及打开某条留言后刷新（不轮询）
@@ -47,7 +53,7 @@ export default function TopBar({ user }: { user: SessionUser }) {
       </Link>
       <nav>
         {links.map((l) => (
-          <Link key={l.href} href={l.href} className={path.startsWith(l.href) ? "active" : ""}>
+          <Link key={l.href} href={l.href} className={activeHref === l.href ? "active" : ""}>
             {l.label}
             {l.href === "/feedback" && unread > 0 && <span className="badge" aria-label={`${unread} 条未读`}>{unread}</span>}
           </Link>
