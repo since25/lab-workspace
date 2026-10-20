@@ -13,7 +13,7 @@ import { LabWorkspaceClient } from "./client.mjs";
 // 避免把密码写进 pi 的 MCP 配置；显式环境变量优先。
 function loadLocalEnv() {
   const explicit = process.env.LAB_MCP_ENV_FILE;
-  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
   const file = explicit || resolve(repoRoot, ".mcp.env");
   if (!existsSync(file)) return;
   for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
