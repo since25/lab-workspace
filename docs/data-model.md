@@ -48,10 +48,13 @@
 
 ### fixed_assets
 
-`id`, `asset_name`, `spec_model`, `category`, `quantity`, `location`, `department`, `user_name`, `import_batch_id`, `created_at`
+`id`, `asset_code`（旧编号，如 ZX-…）, `asset_code_new`（新编号，如 CMC-…）, `asset_name`, `spec_model`, `category`, `quantity`, `location`, `department`, `user_name`, `import_batch_id`, `created_at`
 
-- 来源《固定资产台账》：读取所有含「固定资产名称」「使用部门」表头的工作表，跳过名为 `SheetN` 的草稿/旧版工作表（其内容与正式表重复）；只导入使用部门为研发部的行。
-- 资产编号只用于跨表去重，不入库；全员只读，管理员整表替换。
+- **全量入库**：读取所有含「固定资产名称」「使用部门」表头的工作表，跳过名为 `SheetN` 的草稿/旧版工作表（其内容与正式表重复）；台账里**所有部门**的行都写入，页面能看哪些部门由查询时的部门配置决定（见 `api-contract.md`）。
+- 跳过台账中重复出现的表头行（旧版块会再写一次表头）与「合计」行，跳过缺少使用部门的行；跳过原因在导入预览里按工作表＋行号列出。
+- 两套编号都随行保留，展示优先用新编号；编号同时作为跨表去重依据（没有编号时退回整行比较）。
+- 全员只读，管理员整表替换；台账条目增减不需要改代码，重新导入即可。
+- 页面默认按「资产名称＋规格型号＋使用部门」汇总：同名同规格、不同存放地点的资产只占一行，展开后按地点列出各自的资产编号。
 
 ### freezers / freezer_containers / freezer_samples（冰箱管理）
 
