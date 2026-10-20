@@ -2,11 +2,13 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { withTransaction } from "@/lib/db";
 import { HttpError, handle, ok } from "@/lib/http";
-import { type AssetRow, parseAssetWorkbook } from "@/lib/imports/assets";
+import { type AssetRow, assetDepartments, parseAssetWorkbook } from "@/lib/imports/assets";
 import { readWorkbook } from "@/lib/imports/sheet";
 import { readImportFile } from "@/lib/upload";
 
-const COLS: (keyof AssetRow)[] = ["asset_name", "spec_model", "category", "quantity", "location", "department", "user_name"];
+const COLS: (keyof AssetRow)[] = [
+  "asset_code", "asset_code_new", "asset_name", "spec_model", "category", "quantity", "location", "department", "user_name",
+];
 
 // 管理员导入固定资产台账：preview 只预览；commit 整表替换，失败保留旧数据
 export const POST = handle(async (req: Request) => {
@@ -20,9 +22,10 @@ export const POST = handle(async (req: Request) => {
   }
   const { rows, issues, fatal, sheets_used } = parseAssetWorkbook(sheets);
   if (fatal) throw new HttpError(400, fatal);
-  const summary = { total: rows.length, sheets_used, issues };
+  // 台账全量入库，预览里按部门给出条数，管理员确认后再整表替换
+  const summary = { total: rows.length, sheets_used, issues, departments: assetDepartments(rows) };
   if (mode !== "commit") return ok({ preview: true, ...summary, sample: rows.slice(0, 20) });
-  if (!rows.length) throw new HttpError(400, "文件里没有研发部的资产");
+  if (!rows.length) throw new HttpError(400, "文件里没有可导入的资产");
   const batchId = await withTransaction(async (c) => {
     const b = await c.query<{ id: number }>(
       `INSERT INTO import_batches(dataset_type, filename, row_count, accepted_count, rejected_count, status, error_summary, created_by)

@@ -1,59 +1,16 @@
 import { requireUser } from "@/lib/auth";
+import { assetDisplayDepartments, assetMeta, assetView, listAssetGroupItems, listAssetGroups, listAssetItems } from "@/lib/assets-list";
 import { query } from "@/lib/db";
-import { handle, ok, str } from "@/lib/http";
-import { orderBy } from "@/lib/sort";
+import { handle, ok } from "@/lib/http";
 
-const PAGE = 50;
-const SORTABLE: Record<string, string> = {
-  asset_name: "asset_name", spec_model: "spec_model", category: "category", quantity: "quantity",
-  location: "location", user_name: "user_name",
-};
-
-// 固定资产查询：关键词、使用人、类别、存放地点筛选，可排序分页
+// 固定资产查询：默认返回「名称＋规格型号＋使用部门」汇总视图，view=item 返回逐条明细，view=detail 展开某个分组。
+// 台账全量入库，能看哪些部门由 ASSET_DISPLAY_DEPARTMENTS_JSON 决定，其余靠参数筛选。
 export const GET = handle(async (req: Request) => {
   await requireUser();
   const sp = new URL(req.url).searchParams;
-  const where: string[] = [];
-  const params: unknown[] = [];
-  const q = str(sp.get("q"));
-  if (q) {
-    params.push(`%${q}%`);
-    const p = `$${params.length}`;
-    where.push(`(asset_name ILIKE ${p} OR spec_model ILIKE ${p})`);
-  }
-  const user = str(sp.get("user"));
-  if (user) {
-    params.push(`%${user}%`);
-    where.push(`user_name ILIKE $${params.length}`);
-  }
-  for (const [param, col] of [["category", "category"], ["location", "location"]] as const) {
-    const v = str(sp.get(param));
-    if (v) {
-      params.push(v);
-      where.push(`${col} = $${params.length}`);
-    }
-  }
-  const w = where.length ? "WHERE " + where.join(" AND ") : "";
-  const page = Math.max(1, Number(sp.get("page")) || 1);
-  const [{ count }] = await query<{ count: string }>(`SELECT count(*) FROM fixed_assets ${w}`, params);
-  const items = await query(
-    `SELECT * FROM fixed_assets ${w} ORDER BY ${orderBy(sp, SORTABLE, "asset_name, id")} LIMIT ${PAGE} OFFSET ${(page - 1) * PAGE}`,
-    params
-  );
-  const facets = await query<{ col: string; v: string }>(
-    `SELECT DISTINCT 'category' AS col, category AS v FROM fixed_assets WHERE category <> ''
-     UNION SELECT DISTINCT 'location', location FROM fixed_assets WHERE location <> '' ORDER BY 1, 2`
-  );
-  const [last] = await query<{ filename: string; created_at: string; accepted_count: number }>(
-    "SELECT filename, created_at, accepted_count FROM import_batches WHERE dataset_type = 'assets' AND status = 'committed' ORDER BY id DESC LIMIT 1"
-  );
-  const group = (c: string) => facets.filter((f) => f.col === c).map((f) => f.v);
-  return ok({
-    items,
-    total: Number(count),
-    page,
-    page_size: PAGE,
-    facets: { category: group("category"), location: group("location") },
-    last_import: last ?? null,
-  });
+  const scope = assetDisplayDepartments();
+  const view = assetView(sp);
+  if (view === "detail") return ok({ view, ...(await listAssetGroupItems(query, sp, scope)) });
+  const list = view === "item" ? await listAssetItems(query, sp, scope) : await listAssetGroups(query, sp, scope);
+  return ok({ view, ...list, ...(await assetMeta(query, scope)) });
 });

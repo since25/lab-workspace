@@ -53,6 +53,7 @@ bash infra/windows/build-bundle.sh
 
 ## 5. 日常检查
 
+- 网页与分析服务为常驻任务，`ExecutionTimeLimit` 必须为 `PT0S`（无限）；Windows 默认的 `PT72H` 会在三天后连同守护循环一起终止。安装脚本在注册这两个任务后显式取消时限；备份与 OA 同步任务保持各自原有时限。
 - 健康检查：`http://<地址>:3000/api/v1/health` 返回 `{"status":"ok","db":true,"r_engine":true}`。
 - 服务状态：`schtasks /Query /TN LabWorkspace-Web`、`Get-Service lab-workspace-postgresql`。
 - 手动重启网页或分析服务：`schtasks /End /TN LabWorkspace-Web` 后 `schtasks /Run /TN LabWorkspace-Web`（R 同理）。
@@ -86,3 +87,14 @@ bash infra/windows/build-bundle.sh
 ## 10. OA 部门物料导出（独立部署）
 
 OA 流程使用单独的程序目录和每周六计划任务，每次重新登录后通过网页下载，按配置增量写入部门物料库，保留本地已用完及待审批状态。2026-10-15 已部署新网页、执行迁移 `009_material_usage.sql`、配置两个展示部门并启用增量入库。任务 `LabWorkspace-OA-Export` 每周六北京时间 03:00 执行，使用安装时的现有管理员账号 S4U 无密码登录；该机 Edge 无法在 SYSTEM 下启动。`lab.env` 的部门 JSON 必须使用无外层引号的单行 ASCII（中文用 `\uXXXX` 转义），以兼容 PowerShell 5.1 的读取方式。不可启用旧的整表替换逻辑。详见 [`materials-update-plan.md`](materials-update-plan.md) 与 [`oa-material-export.md`](oa-material-export.md)。
+
+## 11. 固定资产展示部门
+
+台账是**全量入库**（所有部门），页面能看哪些部门由 `lab.env` 的 `ASSET_DISPLAY_DEPARTMENTS_JSON` 决定：
+
+- 未配置：默认只展示「研发部」（线上当前即此状态，不需要改配置）。
+- 配置多个部门：`ASSET_DISPLAY_DEPARTMENTS_JSON=["\u7814\u53d1\u90e8","\u5206\u6790\u5e73\u53f0"]`（`研发部`、`分析平台`）。JSON 与物料一致，必须是**单行、纯 ASCII、中文用 `\uXXXX`**，否则 PowerShell 5.1 读到的中文会乱码。
+- 配置 `["*"]`：不限部门，页面上出现「使用部门」筛选与部门列。
+- 改完配置后执行 `schtasks /End /TN LabWorkspace-Web` + `schtasks /Run /TN LabWorkspace-Web` 让网页服务重新读取。
+
+增加部门、增加台账条目都只需要改配置或重新导入台账，不需要改代码。迁移 `010_asset_codes.sql` 之后必须由管理员在「固定资产 → 导入台账」重新导入一次《固定资产台账》，资产编号和研发部以外的部门才会进入数据库。

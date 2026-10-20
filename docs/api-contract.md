@@ -63,8 +63,13 @@
 - `GET /materials/reconcile/:id`：本人或 admin；其他账号按 `404`
 - `GET /admin/materials/reconcile?status=pending&page=`：仅 admin，审批队列
 - `POST /admin/materials/reconcile`：仅 admin，`{ids,action:"approve"|"reject",note?}`；批准时事务内更新库存、写核对历史、标记采购记录为已用完并清理待审批申请；提交后库存 revision 变化或采购记录不存在时整批 `409`，需驳回重提
-- `GET /assets`：固定资产查询，`q`、`user`、`category`、`location`、`sort`、`dir`、`page`
-- `POST /assets/import`（仅 admin；`mode=preview|commit`；整表替换，只导入研发部）
+- `GET /assets`：固定资产查询，默认返回汇总视图。
+  - `view=group`（默认）：按「资产名称＋规格型号＋使用部门」汇总，每行带 `item_count`、`total_quantity`、`location_count` 与 `locations:[{location,item_count,total_quantity}]` 地点分布；100 组一页。
+  - `view=item`：逐条明细，50 条一页。
+  - `view=detail`：配合 `name`＋`spec`＋`group_department` 展开某个分组的明细（上限 500 条），沿用当前筛选。
+  - 筛选：`q`（同时匹配名称、规格型号与两套资产编号）、`user`（模糊）、`category`、`location`、`department`（后三项精确），`sort`、`dir`、`page`；三种视图共用同一套筛选，保证汇总的地点条数与展开明细一致。
+  - 展示范围：`ASSET_DISPLAY_DEPARTMENTS_JSON`（`lab.env`）配置的部门数组，未配置时默认只展示研发部，配置 `["*"]` 表示不限部门；范围外的数据即使用 `department` 参数指定也不会返回。响应含 `departments`（当前范围，空数组表示不限）、`facets.department`（范围内的部门候选）与 `total_rows`（台账全量条数）。
+- `POST /assets/import`（仅 admin；`mode=preview|commit`；整表替换，台账全量入库，预览返回按部门条数与跳过行原因）
 - `GET /imports/:id/errors`：未导入行清单 CSV
 
 ## 冰箱管理

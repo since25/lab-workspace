@@ -126,6 +126,23 @@ td.nw, th.nw { white-space: nowrap; }
 td.text-col { min-width: 220px; max-width: 360px; }
 td.brand-col { max-width: 160px; }
 td.code-col { max-width: 180px; word-break: normal; overflow-wrap: anywhere; }
+td.code-old { font-size: 12px; }
+
+/* 固定资产：按物品汇总视图（可展开的汇总行 + 存放地点标签） */
+tr.group-row { cursor: pointer; }
+button.row-toggle { min-height: 0; padding: 0 6px; border: none; background: none; color: var(--muted); }
+button.row-toggle:hover { background: none; color: var(--text); }
+.loc-chips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 420px; }
+button.loc-chip { min-height: 24px; padding: 1px 8px; border-radius: 12px; font-size: 12px; line-height: 20px; white-space: nowrap; }
+button.loc-chip:hover { border-color: var(--primary); color: var(--primary); }
+button.loc-chip.selected { border-color: var(--primary); outline: 1px solid var(--primary); color: var(--primary); }
+button.loc-chip .times { color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+button.loc-chip.selected .times { color: var(--primary); }
+tr.subtable-row > td { background: #fafaf9; padding: 4px 10px 12px; }
+tr.subtable-row:hover > td { background: #fafaf9; }
+table.subtable { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+table.subtable th { position: static; background: transparent; padding: 6px 10px; }
+table.subtable td { padding: 6px 10px; }
 
 /* 冰箱管理：分段切换按钮、批量操作条 */
 .seg { display: inline-flex; }

@@ -169,6 +169,13 @@ Step '注册计划任务'
 $ps = 'powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File'
 schtasks /Create /TN 'LabWorkspace-R'   /SC ONSTART /RU SYSTEM /RL HIGHEST /F /TR "$ps $Root\deploy\run-r.ps1" | Out-Null
 schtasks /Create /TN 'LabWorkspace-Web' /SC ONSTART /RU SYSTEM /RL HIGHEST /F /TR "$ps $Root\deploy\run-web.ps1" | Out-Null
+# 常驻服务取消计划任务默认的 72 小时运行上限，避免连同守护循环一起被终止。
+foreach ($t in @('LabWorkspace-R', 'LabWorkspace-Web')) {
+  $task = Get-ScheduledTask -TaskName $t
+  $task.Settings.ExecutionTimeLimit = 'PT0S'
+  Set-ScheduledTask -TaskName $t -Settings $task.Settings | Out-Null
+  if ((Get-ScheduledTask -TaskName $t).Settings.ExecutionTimeLimit -ne 'PT0S') { throw "计划任务 $t 未取消运行时限" }
+}
 schtasks /Create /TN 'LabWorkspace-Backup' /SC DAILY /ST 02:30 /RU SYSTEM /RL HIGHEST /F /TR "$ps $Root\deploy\backup.ps1" | Out-Null
 
 # ---------- 6. 防火墙：只放行 Web 端口给单位内网与 WireGuard 内网 ----------
