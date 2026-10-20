@@ -109,7 +109,7 @@ npm test
 
 | 命令 | 实际结果 |
 |---|---|
-| `npx vitest run` | **11 个测试文件、85 个测试全部通过**（库存 13、库存校对 11、相关路由 12；原 49 个仍通过）。 |
+| `npx vitest run` | 合并 main 的固定资产改动后 **12 个测试文件、94 个测试全部通过**（库存 13、库存校对 11、相关路由 12、固定资产 9；原有测试仍通过）。 |
 | `npx tsc --noEmit` | 通过（全新 worktree 需先 `npm run build` 生成 Next 类型）。 |
 | `npm run build` | 通过；路由包含 `/materials/stock`、`/admin/materials/reconcile`、`/api/v1/materials/reconcile*`、`/api/v1/admin/materials/reconcile` 等。 |
 | `node scripts/check-consumable-stock-ui.mjs` | 通过：独立顶部选项卡、最长路径高亮、部门物料不再重复入口、成员只读、类别汇总、管理员核对、新增默认待核对、历史、生成候选。 |
@@ -130,17 +130,35 @@ npm test
 - `tmp/reconcile-ui-check/admin-reconcile.png`：库存校对审批列表（含库存变化禁止批准）。
 - `tmp/reconcile-ui-check/admin-reconcile-done.png`：批准/驳回后。
 
-## 4. 未测与限制
+## 4. 生产部署（2026-10-20）
 
-- **未连接生产库**：迁移与 SQL 只在 PGlite 内存库用虚构数据执行；未在 windows-wg 生产库执行 `011`/`012`，未验证真实数据量下的性能。
-- **未部署**：未提交、推送、部署，未跑服务端真实登录/权限/浏览器验收。
+- Git：`aad1a86` 补提交此前已部署的固定资产汇总与常驻服务修复；`1911e39` 常用耗材/库存校对/MCP；`01f7bb7` 合并 main；`0ce155a` 修复 MCP 从仓库根读取 `.mcp.env`。已推送 `origin/main`（`2822d51..0ce155a`）。
+- 构建：`bash infra/windows/build-bundle.sh`，`app.zip` 7,619,205 字节，SHA-256 `7743aaf892240f8efad7fc539bd35c55ace55520ebee84daf713ed2ee362922d`，VERSION `01f7bb7`；包含迁移 `010`/`011`/`012`，不含 `.env`/`.mcp.env`。
+- 部署前备份：`E:\lab-workspace\backups\lab_workspace_20261020_1848.dump`（257,796 字节）。
+- 回滚包：`C:\lab-workspace\incoming\app.prev-consumable-20261020_1848.zip`（7,448,969 字节）与 `deploy.prev-consumable-20261020_1848`。
+- 上传：`incoming\app.zip` 与 `incoming\deploy\*.ps1`；远程哈希与本地一致。`install.ps1` 退出码 0，执行 `011_consumable_stock.sql`、`012_stock_reconcile.sql`。
+- 部署后核对：VERSION `01f7bb7`；健康检查 `status=ok db=True r=True`；`LabWorkspace-Web`/`LabWorkspace-R` 均 Running、`ExecutionTimeLimit=PT0S`；`schema_migrations` 含 011/012；`consumable_stock=0`、`stock_reconcile_requests=0`；网页端 `materials/stock` 与 `admin/materials/reconcile` 构建文件存在。
+- 无真实库存/请求数据；管理员首次使用需在「常用耗材」新增条目或点「从采购记录生成候选」，再由成员/agent 提交校对请求。
+
+## 5. pi agent MCP 配置
+
+- 全局配置 `~/.pi/agent/mcp.json` 新增 `lab-workspace`：`node /Users/wangyichuan/localissue/lab-workspace/apps/mcp-server/src/index.mjs`，env 仅 `LAB_WORKSPACE_URL=http://192.168.7.5:3000`。
+- 账号密码放在 `lab-workspace/.mcp.env`：`LAB_USERNAME`/`LAB_PASSWORD`，已被 `.gitignore` 的 `*.env` 忽略，权限 `600`；MCP 服务从仓库根自动读取（`LAB_MCP_ENV_FILE` 可覆盖）。
+- 生产账号 `mcp`（member、active）此前用 `.mcp.env` 登录返回 401；经用户确认，将其密码重置为 `.mcp.env` 的值、清空失败次数、删除旧会话，并写一条 `audit_logs`（`user.update`，`password_reset=true`）。未新建账号，未改角色。
+- 验证：`pi mcp list` 显示 `connected, 3 tools`；`pi-mcp-adapter doctor` 返回 `ok, 3 tools`；用真实 MCP 客户端调用 `search_consumable("24孔板")` 返回 200（当前数据 0 条）、`get_stock_reconciliation` 返回 0 条待审批。`mcp` 访问 `/materials/stock` 200，访问 `/admin/materials/reconcile` 307（非管理员，符合预期）。
+
+## 6. 未测与限制
+
 - **未跑真实 OA 同步**：未验证「OA 同步后库存不被覆盖」的生产链路（代码层面库存/校对表不在同步语句中）。
-- **未接真实 pi agent**：MCP 用官方 SDK 客户端做了 stdio 集成测试，但没有在 pi agent 的真实配置中运行；不同 MCP 客户端的配置键名可能不同。
+- **生产数据为空**：库存与校对请求均为 0，未做真实物料/审批的端到端数据验收；服务层测试覆盖了完整流程。
+- **未在 pi 交互会话中实际对话**：已用真实 MCP 客户端和生产 API 验证工具连接与检索；pi 会话内的自然语言编排未截图验收。
 - **采购周期数值未测**：无生产库只读权限、未访谈部门；报告提供 SQL 与盘点模板，具体交期/消耗/安全库存需部门确认后补。
-- **权限选择**：库存写操作、库存校对审批仅管理员；agent 建议使用普通成员账号。若需要成员直接核对，应另加审批流程。
+- **权限选择**：库存写操作、库存校对审批仅管理员；agent 使用 `mcp` 普通成员账号，不能批准。
 - **开源项目未实际部署**：评估基于 GitHub API 与官方文档，未在 windows-wg 上做 PoC。
 
-## 5. 回滚
+## 7. 回滚
 
-- 代码：丢弃 `task-56` 分支或 worktree 即可；主分支未改动。
-- 数据库：`011`/`012` 只新增表；回滚按部署前备份恢复。删除表会丢失库存、核对历史和校对请求，但不影响 `material_items`。
+- 代码：本地 main 回到 `aad1a86` 或 `2822d51`；远程需另一次推送。已部署应用包回滚见下。
+- 应用：把 `C:\lab-workspace\incoming\app.prev-consumable-20261020_1848.zip` 覆盖为 `app.zip`，重新执行 `install.ps1`；部署脚本可从 `deploy.prev-consumable-20261020_1848` 恢复。
+- 数据库：部署前备份 `E:\lab-workspace\backups\lab_workspace_20261020_1848.dump`；`011`/`012` 只新增表，也可仅删除两张表并从 `schema_migrations` 移除两条记录。
+- MCP：`pi mcp remove lab-workspace` 可撤销本机配置；生产 `mcp` 账号密码重置没有备份旧哈希，如需恢复旧密码需重新设置。
