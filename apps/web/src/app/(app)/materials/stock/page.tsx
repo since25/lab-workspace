@@ -19,8 +19,13 @@ interface StockItem {
   revision: number;
   status: "out" | "stale" | "ok";
   stale: boolean;
+  slot_key: string | null;
+  baseline_at: string | null;
+  skus: { item_name: string; brand: string; spec_model: string }[];
   monthly_usage: number | null;
+  usage_basis: "checks" | "purchases" | null;
   last_purchase: { on: string; quantity: number | null; unit: string } | null;
+  pending_inbound: number;
 }
 
 interface CategorySummary {
@@ -37,6 +42,7 @@ interface StockResponse {
   items: StockItem[];
   summary: { item_count: number; out_count: number; stale_count: number; last_checked_at: string | null };
   stale_days: number;
+  review: { pending: number; inbound: number };
 }
 
 interface CheckRow {
@@ -46,11 +52,15 @@ interface CheckRow {
   note: string;
   checked_at: string;
   checked_by_name: string | null;
+  kind: "check" | "inbound";
 }
 
-const STATUS_LABEL = { out: "已用完", stale: "需复核", ok: "正常" } as const;
+// 一个槽位按整箱/整包计数，数到 0 即需要采购（不管外面有没有已开封的）。
+const STATUS_LABEL = { out: "需采购", stale: "需复核", ok: "正常" } as const;
 const num = (value: number) => String(Number(value));
 const when = (value: string | null) => (value ? new Date(value).toLocaleString("zh-CN") : "尚未核对");
+const day = (value: string | null) => (value ? new Date(value).toLocaleDateString("zh-CN") : "");
+const skuText = (k: StockItem["skus"][number]) => [k.brand, k.spec_model || k.item_name].filter(Boolean).join(" ");
 // 类别存「大类/子类」：标签卡按大类，行内子标签显示子类。
 const groupOf = (category: string) => category.split("/")[0];
 const subOf = (category: string) => (category.includes("/") ? category.slice(category.indexOf("/") + 1) : "");
@@ -145,7 +155,7 @@ export default function ConsumableStockPage() {
       if (createForm.quantity.trim() !== "") body.quantity = createForm.quantity;
       await api("/api/v1/materials/stock", { method: "POST", body: JSON.stringify(body) });
       setDialog(null);
-      setNotice("已新增耗材。");
+      setNotice("已新增槽位。");
       setRefresh((v) => v + 1);
     } catch (e) {
       setDialogError(errText(e));
@@ -186,7 +196,7 @@ export default function ConsumableStockPage() {
         }),
       });
       setDialog(null);
-      setNotice("已保存耗材信息。");
+      setNotice("已保存槽位信息。");
       setRefresh((v) => v + 1);
     } catch (e) {
       setDialogError(errText(e));
@@ -196,24 +206,39 @@ export default function ConsumableStockPage() {
   }
 
   async function remove(item: StockItem) {
-    if (!window.confirm(`确认删除「${item.item_name}」及其核对历史？此操作只删除库存条目，不影响采购记录。`)) return;
+    if (!window.confirm(`确认删除槽位「${item.item_name}」及其核对历史和已挂货号？此操作不影响采购记录。`)) return;
     setError("");
     try {
       await api(`/api/v1/materials/stock/${item.id}`, { method: "DELETE" });
-      setNotice("已删除耗材条目。");
+      setNotice("已删除槽位。");
       setRefresh((v) => v + 1);
     } catch (e) {
       setError(errText(e));
     }
   }
 
-  async function sync() {
-    if (!window.confirm("从当前展示部门的采购记录中按类别关键词匹配近 12 个月复购（至少 2 笔）的耗材，异名合并后只新增缺失的候选，不会修改已有库存。继续？")) return;
+  async function initTemplates() {
+    if (!window.confirm("按内置模板建立固定规格槽位（细胞耗材、塑料耗材、通用耗材、培养基、常用试剂）。只补缺失的槽位，不改已有槽位和数量。继续？")) return;
     setBusy(true);
     setError("");
     try {
-      const result = await api<{ scanned: number; candidates: number; created: number; skipped: number }>("/api/v1/materials/stock/sync", { method: "POST" });
-      setNotice(`扫描 ${result.scanned} 条采购记录，匹配 ${result.candidates} 条，新增 ${result.created} 条，跳过 ${result.skipped} 条已存在条目。`);
+      const result = await api<{ templates: number; created: number; skipped: number }>("/api/v1/materials/stock/templates", { method: "POST" });
+      setNotice(`模板共 ${result.templates} 个槽位：新建 ${result.created} 个，已存在 ${result.skipped} 个。`);
+      setRefresh((v) => v + 1);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function match() {
+    if (!window.confirm("扫描展示部门里尚未处理的采购记录：认识的货号直接归到原槽位，其余按规则给出建议槽位，等你在核对工作台确认。不会改动库存数量。继续？")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ scanned: number; suggested: number; known: number; excluded: number; unmatched: number }>("/api/v1/materials/stock/sync", { method: "POST" });
+      setNotice(`扫描 ${result.scanned} 条尚未归入的采购记录：待确认 ${result.suggested} 条，按已知货号归入 ${result.known} 条，按已排除货号排除 ${result.excluded} 条，${result.unmatched} 条不是常用耗材。`);
       setRefresh((v) => v + 1);
     } catch (e) {
       setError(errText(e));
@@ -229,15 +254,15 @@ export default function ConsumableStockPage() {
     <>
       <h1>常用耗材库存</h1>
       <p className="muted">
-        按大类汇总细胞房高频耗材，库存数量以最近一次人工核对为准；数量为 0 显示「已用完」，从未核对或超过 {data?.stale_days ?? 30} 天未核对显示「需复核」。
-        该数量与 OA 采购记录分开保存，采购增量同步不会覆盖核对结果；「参考消耗/月」「最近采购」由采购记录自动带出。
+        每行是一个固定规格槽位（如「200µL 滤芯吸头」），品牌货号挂在槽位下，只用来识别采购入库。数量按采购单位整箱/整包计，以人工核对为准：
+        第一次核对即为基线，之后由「采购入库确认 + 定期盘点」更新。数量为 0 显示「需采购」，从未核对或超过 {data?.stale_days ?? 30} 天未核对显示「需复核」。
       </p>
       <div className="toolbar">
         <Link href="/materials">← 返回部门物料</Link>
         <span className="spacer" />
         {summary && (
           <span className="muted">
-            共 {summary.item_count} 种：已用完 {summary.out_count}、需复核 {summary.stale_count}
+            共 {summary.item_count} 个槽位：需采购 {summary.out_count}、需复核 {summary.stale_count}
           </span>
         )}
       </div>
@@ -251,7 +276,7 @@ export default function ConsumableStockPage() {
             <button key={c.name} className={f.category === c.name ? "active" : ""} onClick={() => setF({ ...f, category: c.name })}>
               {c.name}<span className="count">{c.item_count}</span>
               {(c.out_count > 0 || c.stale_count > 0) && (
-                <span className="stock-alert" title="已用完 + 需复核">⚠{c.out_count + c.stale_count}</span>
+                <span className="stock-alert" title="需采购 + 需复核">⚠{c.out_count + c.stale_count}</span>
               )}
             </button>
           ))}
@@ -261,20 +286,27 @@ export default function ConsumableStockPage() {
       <div className="toolbar">
         <label className="field">
           搜索
-          <input style={{ width: 220 }} placeholder="名称 / 品牌 / 规格 / 备注" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
+          <input style={{ width: 220 }} placeholder="槽位名称 / 品牌 / 规格 / 备注" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
         </label>
         <label className="field">
           状态
           <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>
             <option value="">全部状态</option>
-            <option value="out">已用完</option>
+            <option value="out">需采购</option>
             <option value="stale">需复核</option>
             <option value="ok">正常</option>
           </select>
         </label>
         <span className="spacer" />
-        {isAdmin && <button disabled={busy} onClick={sync}>从采购记录生成候选</button>}
-        {isAdmin && <button className="primary" onClick={openCreate}>新增耗材</button>}
+        {isAdmin && <button disabled={busy} onClick={initTemplates}>建立槽位模板</button>}
+        {isAdmin && <button disabled={busy} onClick={match}>匹配采购记录</button>}
+        {isAdmin && data && (
+          <Link className="button" href="/materials/stock/review">
+            核对工作台
+            {data.review.pending + data.review.inbound > 0 && <span className="badge" title="待确认归属 + 待入库">{data.review.pending + data.review.inbound}</span>}
+          </Link>
+        )}
+        {isAdmin && <button className="primary" onClick={openCreate}>新增槽位</button>}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -284,10 +316,10 @@ export default function ConsumableStockPage() {
         <table>
           <thead>
             <tr>
-              <th>类别</th><th>耗材名称</th><th>品牌</th><th>规格型号</th><th>单位</th><th>当前库存</th>
+              <th>类别</th><th>槽位</th><th>已挂货号</th><th>单位</th><th>当前库存</th>
               <th>状态</th><th>最近核对</th>
-              <th title="由采购记录自动计算：同品采购量合计 ÷ 首次到最近采购跨越的月数（至少 2 笔）">参考消耗/月*</th>
-              <th title="由采购记录自动带出">最近采购*</th><th>操作</th>
+              <th title="有两次以上盘点（相隔 ≥ 28 天）时按盘点差计算；否则按已归入的采购记录估算（标 *）">消耗/月</th>
+              <th title="已归入该槽位的最近一笔采购">最近采购</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -299,20 +331,38 @@ export default function ConsumableStockPage() {
                 </td>
                 <td className="text-col">
                   {item.item_name}
+                  {(item.brand || item.spec_model) && <div className="muted">{[item.brand, item.spec_model].filter(Boolean).join(" ")}</div>}
                   {item.note && <div className="muted">{item.note}</div>}
                 </td>
-                <td>{item.brand || "—"}</td>
-                <td className="mono">{item.spec_model || "—"}</td>
+                <td className="text-col">
+                  {item.skus.length ? (
+                    <details>
+                      <summary>{item.skus.length} 个</summary>
+                      <ul className="stock-skus">{item.skus.map((k, i) => <li key={i} title={k.item_name}>{skuText(k)}</li>)}</ul>
+                    </details>
+                  ) : <span className="muted">—</span>}
+                </td>
                 <td className="nw">{item.unit || "—"}</td>
                 <td className="num nw">{item.last_checked_at ? num(item.quantity) : "—"}</td>
                 <td className="nw">
                   <span className={`stock-status stock-${item.status}`}>{STATUS_LABEL[item.status]}</span>
+                  {item.pending_inbound > 0 && (
+                    <div>
+                      {isAdmin
+                        ? <Link href="/materials/stock/review?view=inbound" className="stock-inbound">待入库 {item.pending_inbound}</Link>
+                        : <span className="stock-inbound">待入库 {item.pending_inbound}</span>}
+                    </div>
+                  )}
                 </td>
                 <td className="nw">
                   {when(item.last_checked_at)}
                   {item.checked_by_name && <div className="muted">{item.checked_by_name}</div>}
+                  {item.baseline_at && <div className="muted">基线 {day(item.baseline_at)}</div>}
                 </td>
-                <td className="num nw">{item.monthly_usage === null ? "" : `${num(item.monthly_usage)} ${item.unit}`}</td>
+                <td className="num nw">
+                  {item.monthly_usage === null ? "" : `${num(item.monthly_usage)} ${item.unit}`}
+                  {item.usage_basis === "purchases" && <span className="muted" title="按采购记录估算，盘点满一个月后改为实际消耗">*</span>}
+                </td>
                 <td className="nw">
                   {item.last_purchase && (
                     <>
@@ -331,8 +381,8 @@ export default function ConsumableStockPage() {
             ))}
             {data && !data.items.length && (
               <tr>
-                <td colSpan={11} className="muted">
-                  {data.summary.item_count ? "没有符合筛选条件的耗材" : "还没有库存条目，管理员可从采购记录生成候选或手动新增。"}
+                <td colSpan={10} className="muted">
+                  {data.summary.item_count ? "没有符合筛选条件的槽位" : "还没有槽位，管理员可点「建立槽位模板」或手动新增。"}
                 </td>
               </tr>
             )}
@@ -344,7 +394,7 @@ export default function ConsumableStockPage() {
         <div className="dialog-backdrop" onClick={(e) => e.target === e.currentTarget && setDialog(null)}>
           <div className="dialog">
             <h2 style={{ marginTop: 0 }}>
-              {dialog.kind === "create" ? "新增耗材" : dialog.kind === "check" ? `核对库存：${dialog.item.item_name}` : `编辑耗材：${dialog.item.item_name}`}
+              {dialog.kind === "create" ? "新增槽位" : dialog.kind === "check" ? `核对库存：${dialog.item.item_name}` : `编辑槽位：${dialog.item.item_name}`}
             </h2>
             {dialog.kind === "create" && (
               <div className="form-grid">
@@ -354,10 +404,10 @@ export default function ConsumableStockPage() {
                     <CategoryOptions categories={data?.categories ?? []} />
                   </select>
                 </label>
-                <label className="field">名称<input value={createForm.item_name} onChange={(e) => setCreateForm({ ...createForm, item_name: e.target.value })} /></label>
-                <label className="field">品牌<input value={createForm.brand} onChange={(e) => setCreateForm({ ...createForm, brand: e.target.value })} /></label>
-                <label className="field">规格型号<input value={createForm.spec_model} onChange={(e) => setCreateForm({ ...createForm, spec_model: e.target.value })} /></label>
-                <label className="field">单位<input placeholder="盒 / 箱 / 瓶" value={createForm.unit} onChange={(e) => setCreateForm({ ...createForm, unit: e.target.value })} /></label>
+                <label className="field">槽位名称<input placeholder="如 48孔板 TC" value={createForm.item_name} onChange={(e) => setCreateForm({ ...createForm, item_name: e.target.value })} /></label>
+                <label className="field">品牌（单品试剂才填）<input value={createForm.brand} onChange={(e) => setCreateForm({ ...createForm, brand: e.target.value })} /></label>
+                <label className="field">规格型号（单品试剂才填）<input value={createForm.spec_model} onChange={(e) => setCreateForm({ ...createForm, spec_model: e.target.value })} /></label>
+                <label className="field">单位（按采购单位，如箱）<input placeholder="箱 / 包 / 瓶" value={createForm.unit} onChange={(e) => setCreateForm({ ...createForm, unit: e.target.value })} /></label>
                 <label className="field">
                   初始库存（留空表示待核对）
                   <input type="number" min={0} step="0.01" value={createForm.quantity} onChange={(e) => setCreateForm({ ...createForm, quantity: e.target.value })} />
@@ -370,7 +420,7 @@ export default function ConsumableStockPage() {
                 <p className="muted">
                   当前库存：{dialog.item.last_checked_at ? `${num(dialog.item.quantity)} ${dialog.item.unit}` : "尚未核对"}；
                   上次核对：{when(dialog.item.last_checked_at)}{dialog.item.checked_by_name ? `（${dialog.item.checked_by_name}）` : ""}。
-                  核对会覆盖当前数量并保留历史。
+                  核对会覆盖当前数量并保留历史。{dialog.item.baseline_at ? "" : "这是该槽位第一次核对，将作为基线：基线日及以前的采购视为已数在内，之后的采购在核对工作台确认入库。"}
                 </p>
                 <div className="form-grid">
                   <label className="field">
@@ -389,7 +439,7 @@ export default function ConsumableStockPage() {
                     <CategoryOptions categories={data?.categories ?? []} />
                   </select>
                 </label>
-                <label className="field">名称<input value={editForm.item_name} onChange={(e) => setEditForm({ ...editForm, item_name: e.target.value })} /></label>
+                <label className="field">槽位名称<input value={editForm.item_name} onChange={(e) => setEditForm({ ...editForm, item_name: e.target.value })} /></label>
                 <label className="field">品牌<input value={editForm.brand} onChange={(e) => setEditForm({ ...editForm, brand: e.target.value })} /></label>
                 <label className="field">规格型号<input value={editForm.spec_model} onChange={(e) => setEditForm({ ...editForm, spec_model: e.target.value })} /></label>
                 <label className="field">单位<input value={editForm.unit} onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })} /></label>
@@ -412,22 +462,23 @@ export default function ConsumableStockPage() {
         <div className="dialog-backdrop" onClick={(e) => e.target === e.currentTarget && setHistory(null)}>
           <div className="dialog">
             <h2 style={{ marginTop: 0 }}>核对历史：{history.item.item_name}</h2>
-            <p className="muted">最近 20 次核对。数量变化和备注保留在库存台账中，采购记录不受影响。</p>
+            <p className="muted">最近 20 次盘点与入库。数量变化和备注保留在库存台账中，采购记录不受影响。</p>
             {history.error && <div className="error">{history.error}</div>}
             <div className="table-wrap">
               <table>
-                <thead><tr><th>时间</th><th>操作人</th><th>改前</th><th>改后</th><th>备注</th></tr></thead>
+                <thead><tr><th>时间</th><th>类型</th><th>操作人</th><th>改前</th><th>改后</th><th>备注</th></tr></thead>
                 <tbody>
                   {history.rows.map((row) => (
                     <tr key={row.id}>
                       <td className="nw">{when(row.checked_at)}</td>
+                      <td className="nw">{row.kind === "inbound" ? "入库" : "盘点"}</td>
                       <td className="nw">{row.checked_by_name || "账号已删除"}</td>
                       <td className="num">{num(row.before_qty)}</td>
                       <td className="num">{num(row.after_qty)}</td>
                       <td>{row.note || "—"}</td>
                     </tr>
                   ))}
-                  {!history.rows.length && !history.error && <tr><td colSpan={5} className="muted">{history.item.last_checked_at ? "没有核对记录。" : "尚未核对过。"}</td></tr>}
+                  {!history.rows.length && !history.error && <tr><td colSpan={6} className="muted">{history.item.last_checked_at ? "没有核对记录。" : "尚未核对过。"}</td></tr>}
                 </tbody>
               </table>
             </div>

@@ -20,7 +20,7 @@ V1 功能已开发完成：登录与账号管理、细胞冻存库、冰箱管�
 2026-10-16 固定资产台账改为全量入库（所有部门）＋「按物品汇总」视图：同名同规格、不同存放地点的资产只占一行，展开看每个地点的资产编号；页面展示哪些部门由 `ASSET_DISPLAY_DEPARTMENTS_JSON` 配置（默认研发部）。详见 [`progress/2026-10-16-assets-grouping.md`](progress/2026-10-16-assets-grouping.md)。
 
 
-2026-10-20 新增独立选项卡「常用耗材」：按配置类别汇总吸头、细胞培养板、移液管、离心管、培养基等，记录当前库存/安全库存与每次核对历史，支持管理员手工核对、从采购记录生成候选待核对条目，库存与 OA 采购记录分表保存。成员或 agent 可提交「库存校对请求」（同时建议库存数量和待标记的采购记录），管理员在「物料审批 → 库存校对」批准后生效；agent 通过 `apps/mcp-server` 的 MCP 工具对话式调用。设计与操作见 [`docs/consumable-stock.md`](docs/consumable-stock.md)，agent 接入见 [`docs/agent-mcp.md`](docs/agent-mcp.md)，采购周期与开源选型调研见 [`docs/material-inventory-research.md`](docs/material-inventory-research.md)。
+2026-10-20 新增独立选项卡「常用耗材」：按配置类别汇总吸头、细胞培养板、移液管、离心管、培养基等，记录当前库存/安全库存与每次核对历史，支持管理员手工核对、从采购记录生成候选待核对条目，库存与 OA 采购记录分表保存。成员或 agent 可提交「库存校对请求」（同时建议库存数量和待标记的采购记录），管理员在「物料审批 → 库存校对」批准后生效；agent 通过 `apps/mcp-server` 的 MCP 工具对话式调用。2026-10-21 起改为「固定规格槽位」：每行是一个规格（如 200µL 滤芯吸头），品牌货号挂在槽位下；采购按规则建议归位、管理员在「核对工作台」确认，第一次核对为基线，之后按采购入库确认 + 定期盘点更新。设计与操作见 [`docs/consumable-stock.md`](docs/consumable-stock.md)，agent 接入见 [`docs/agent-mcp.md`](docs/agent-mcp.md)，采购周期与开源选型调研见 [`docs/material-inventory-research.md`](docs/material-inventory-research.md)。
 
 ## 目录
 

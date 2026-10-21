@@ -86,7 +86,7 @@ MCP 服务不直接连 PostgreSQL，也不携带管理员权限。它用一个�
 ```
 
 - `suggested_material_ids` 是尚未已用完、也还没有待审批「已用完申请」的采购记录；`pending_material_ids` 是已在等待审批的记录。agent 应先向用户说明两者区别。采购记录最多返回 500 条，超过时 `summary.truncated` 为 true；`departments` 是当前展示部门。
-- 库存状态：`out` 已用完（已核对且数量 0）、`stale` 需复核（从未核对或超过 30 天未核对）、`ok` 正常；从未核对的数量视为未知，不当作 0。
+- 库存状态：`out` 需采购（已核对且数量 0）、`stale` 需复核（从未核对或超过 30 天未核对）、`ok` 正常；从未核对的数量视为未知，不当作 0。
 - 名称匹配会同时比较去掉空格后的文本，`24孔板` 能匹配 `24 孔板`。
 
 ### `submit_stock_reconciliation`

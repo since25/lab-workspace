@@ -1,7 +1,8 @@
 import { MaterialError } from "./materials-data";
+import { SLOT_TEMPLATES } from "./consumable-slots";
 
-// 常用耗材的类别与关键词只用于「从采购记录生成候选」，库存条目的类别由管理员确认。
 // 类别名写成「大类/子类」（如「塑料耗材/吸头」），页面标签卡按大类（「/」前的部分）汇总和过滤。
+// 2026-10 起库存按固定规格槽位管理，采购归类由 consumable-slots.ts 的规则完成；keywords 仅为兼容旧配置保留，不再使用。
 export interface StockCategory {
   name: string;
   keywords: string[];
@@ -18,29 +19,9 @@ export interface StockLike {
 // 超过该天数未核对即提示复核；不自动改数量。
 export const STOCK_STALE_DAYS = 30;
 
-// 关键词中英双语：台账里不少品名只有英文（如 PENICILLIN STREPTOMYCIN）。
-// 不收「glutamax」：采购记录里它只出现在 RPMI/IMDM 培养基的名称中，收了会把培养基误归到添加物。
+// 默认类别 = 槽位模板里出现的类别（按模板顺序）+「其他」（手工新增的杂项）。
 const DEFAULT_STOCK_CATEGORIES: StockCategory[] = [
-  { name: "普通用品/手套", keywords: ["手套", "丁腈", "乳胶手套", "glove", "nitrile"] },
-  { name: "普通用品/口罩帽鞋套", keywords: ["口罩", "鞋套", "袖套", "头套", "一次性帽", "实验服", "mask", "shoecover"] },
-  { name: "普通用品/纸品清洁", keywords: ["擦手纸", "擦拭纸", "纸巾", "垃圾袋", "酒精", "75%乙醇", "消毒", "kimwipes", "wipes"] },
-  { name: "普通用品/标签打印", keywords: ["标签", "碳带", "记号笔", "cryolabel"] },
-  { name: "塑料耗材/吸头", keywords: ["吸头", "枪头", "滤芯吸头", "分液管", "tip", "tips", "combitips"] },
-  { name: "塑料耗材/离心管冻存管", keywords: ["离心管", "ep管", "冻存管", "cryovial", "centrifugetube", "microtube", "safe-lock"] },
-  { name: "塑料耗材/移液管", keywords: ["移液管", "巴氏吸管", "serological", "serologicalpipet"] },
-  { name: "塑料耗材/PCR板连管封膜", keywords: ["pcr板", "pcr管", "连管", "联管", "联排管", "裙边", "封板膜", "封口膜", "封膜", "pcrplate", "striptube", "sealingfilm", "microamp"] },
-  { name: "塑料耗材/培养板皿", keywords: ["培养板", "孔板", "培养皿", "培养瓶", "transwell", "小室", "dish", "flask", "wellplate", "cellcultureplate", "24孔", "48孔"] },
-  { name: "塑料耗材/瓶槽盒架", keywords: ["加样槽", "冻存盒", "冰盒", "吸头盒", "试剂瓶", "血清瓶", "离心管架", "reservoir", "cryobox"] },
-  { name: "塑料耗材/滤器", keywords: ["滤器", "滤膜", "细胞筛", "过滤器", "超滤管", "strainer", "syringefilter"] },
-  { name: "塑料耗材/研磨管电转耗材", keywords: ["裂解介质管", "研磨管", "电转杯", "电转", "nucleocuvette", "cuvette", "lysingmatrix"] },
-  { name: "生物试剂/培养基", keywords: ["培养基", "dmem", "rpmi", "imdm", "emem", "opti-mem", "optimem", "methocult", "medium"] },
-  { name: "生物试剂/添加物消化", keywords: ["血清", "fbs", "双抗", "青链霉素", "penicillin", "streptomycin", "胰酶", "trypsin", "accutase", "pbs", "dpbs", "生理盐水", "冻存液", "cellbanker", "neaa"] },
-  { name: "生物试剂/转染", keywords: ["转染", "lipofectamine", "messengermax", "polyplus", "jetprime", "jetoptimus", "eztrans", "transfection"] },
-  { name: "试剂盒/核酸提取纯化", keywords: ["提取试剂盒", "纯化试剂盒", "isolation", "quickextract", "fastpure", "cleanbeads", "磁珠", "minikit", "purification"] },
-  { name: "试剂盒/分子克隆PCR", keywords: ["mastermix", "pcrmix", "premix", "感受态", "competent", "无缝克隆", "连接酶", "goldengate", "phanta", "cloning"] },
-  { name: "试剂盒/逆转录RNA", keywords: ["逆转录", "racekit", "smarterrace", "trizol", "hiscript", "reversetranscri"] },
-  { name: "试剂盒/检测试剂盒", keywords: ["elisa", "elisakit", "elisa试剂盒", "assaykit", "assaysystem", "检测试剂盒", "ribogreen", "检测盒"] },
-  { name: "试剂盒/核酸染料", keywords: ["核酸染料", "gelred", "yeared", "sybr", "goldview"] },
+  ...[...new Set(SLOT_TEMPLATES.map((s) => s.category))].map((name) => ({ name, keywords: [] })),
   { name: "其他", keywords: [] },
 ];
 
@@ -91,19 +72,6 @@ export function stockSubcategory(category: string): string {
 
 export function stockGroups(categories: StockCategory[]): string[] {
   return [...new Set(categories.map((c) => stockGroup(c.name)))];
-}
-
-// 命中多个类别时取匹配到的最长关键词（「pcr板」优先于「孔板」），一样长时按配置顺序。
-export function classifyConsumable(text: string, categories: StockCategory[]): string | null {
-  const hay = normalizeStockText(text);
-  if (!hay) return null;
-  let best: { name: string; length: number } | null = null;
-  for (const category of categories) {
-    for (const keyword of category.keywords) {
-      if (keyword && hay.includes(keyword) && (!best || keyword.length > best.length)) best = { name: category.name, length: keyword.length };
-    }
-  }
-  return best?.name ?? null;
 }
 
 export function stockStale(item: StockLike, now = Date.now()): boolean {

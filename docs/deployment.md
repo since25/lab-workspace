@@ -19,7 +19,7 @@
 
 ### 常用耗材类别配置（可选）
 
-`lab.env` 可增加 `MATERIAL_STOCK_CATEGORIES_JSON`，覆盖默认的「大类/子类」类别与采购记录匹配关键词；不配置时使用内置四大类（普通用品/塑料耗材/生物试剂/试剂盒）+ 其他。升级到两级分类版本时，若 `lab.env` 里还留着旧五类配置，需删除该行或换成新格式，否则标签卡仍是旧五类。格式与注意事项见 [`consumable-stock.md`](consumable-stock.md)。升级到包含 `011_consumable_stock.sql` / `012_stock_reconcile.sql` 的版本时，安装脚本会自动执行迁移；两个迁移只新增库存、核对和库存校对请求表，不修改既有采购记录。真实类别与部门名称不写入安装包或 Git。
+`lab.env` 可增加 `MATERIAL_STOCK_CATEGORIES_JSON`，覆盖默认的「大类/子类」类别与采购记录匹配关键词；不配置时使用内置四大类（普通用品/塑料耗材/生物试剂/试剂盒）+ 其他。升级到两级分类版本时，若 `lab.env` 里还留着旧五类配置，需删除该行或换成新格式，否则标签卡仍是旧五类。格式与注意事项见 [`consumable-stock.md`](consumable-stock.md)。升级到包含 `011_consumable_stock.sql` / `012_stock_reconcile.sql` / `013_consumable_slots.sql` 的版本时，安装脚本会自动执行迁移；迁移只新增库存相关的表和列，不修改既有采购记录。2026-10-21 起默认类别改为槽位模板的五大类（细胞耗材/塑料耗材/通用耗材/培养基/常用试剂）+ 其他，上线后由管理员依次「建立槽位模板 → 匹配采购记录 → 核对工作台确认 → 第一次核对」。真实类别与部门名称不写入安装包或 Git。
 
 agent 用的 MCP 服务不部署在 windows-wg，而由使用 agent 的电脑以 stdio 启动，通过 HTTP 连接工作台；使用普通成员账号，批准仍在网页「物料审批 → 库存校对」完成。安装与配置见 [`agent-mcp.md`](agent-mcp.md)。
 

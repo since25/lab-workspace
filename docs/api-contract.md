@@ -50,13 +50,16 @@
 - `POST /materials/:id/usage`：`{action:"mark",confirmed:true}`；普通成员提交待审批申请，管理员直接标记；`restore/approve/reject` 仅 admin，超出展示部门的记录不可操作
 - `GET /admin/materials/usage-requests?page=`：仅 admin，分页查询展示部门的未批准申请
 - `POST /admin/materials/usage-requests`：仅 admin，`{ids,action:"approve"|"reject"}`，单次最多 500 条；已变化的状态跳过，任一 ID 不存在或超出范围则整批拒绝
-- `GET /materials/stock`：常用耗材库存列表，所有登录用户；`category`（大类，如 `塑料耗材`，按「大类/」前缀过滤；或配置中的完整类别「大类/子类」）、`q`（名称/品牌/规格/备注）、`status=out|stale|ok`；返回 `groups`（大类标签卡汇总，含空大类）、`categories`（每个子类汇总）、`items`、`summary`、`stale_days`。汇总字段为 `item_count/out_count/stale_count/last_checked_at`。状态三态：`out` 已核对且数量为 0，`stale` 从未核对或超过 `stale_days` 天未核对，`ok` 其余；不再返回 `safety_stock`。每个 item 附带 `monthly_usage`（参考消耗/月，数字或 null）与 `last_purchase`（`{on,quantity,unit}` 或 null），由展示部门采购记录按名称+品牌+规格归一后自动计算
+- `GET /materials/stock`：常用耗材库存列表，所有登录用户；`category`（大类，如 `塑料耗材`，按「大类/」前缀过滤；或配置中的完整类别「大类/子类」）、`q`（名称/品牌/规格/备注）、`status=out|stale|ok`；返回 `groups`（大类标签卡汇总，含空大类）、`categories`（每个子类汇总）、`items`、`summary`、`stale_days`、`review`（`{pending,inbound}` 核对工作台待办数）。汇总字段为 `item_count/out_count/stale_count/last_checked_at`。状态三态：`out` 需采购（已核对且数量为 0），`stale` 从未核对或超过 `stale_days` 天未核对，`ok` 其余；不再返回 `safety_stock`。每个 item（= 一个槽位）附带 `slot_key`、`baseline_at`、`skus`（已挂货号 `[{item_name,brand,spec_model}]`）、`monthly_usage` 与 `usage_basis`（`checks` 按盘点差 / `purchases` 按采购估算 / null）、`last_purchase`（`{on,quantity,unit}` 或 null，取已归入该槽位的采购）、`pending_inbound`（基线后待入库条数）
 - `POST /materials/stock`：仅 admin，新增条目 `{category,item_name,brand?,spec_model?,unit?,quantity?,note?}`；`quantity` 省略表示未核对（状态 `stale`）；`safety_stock` 已停用，传入会被忽略；同名同品牌同规格重复返回 409
 - `PATCH /materials/stock/:id`：仅 admin，修改类别/名称/品牌/规格/单位/备注；传 `quantity` 返回 400（数量须走核对）；`safety_stock` 已停用，传入会被忽略
 - `DELETE /materials/stock/:id`：仅 admin，删除条目及核对历史，审计写快照
-- `POST /materials/stock/:id/check`：仅 admin，`{quantity,note?,expected_revision?}`；`revision` 不一致返回 409，成功写入核对历史并递增版本
-- `GET /materials/stock/:id/checks?limit=10`：所有登录用户，最近核对历史（最多 50 条）
-- `POST /materials/stock/sync`：仅 admin，从展示部门的启用采购记录按类别关键词生成缺失条目（数量 0、待核对）；返回 `{scanned,candidates,created,skipped}`，不改已有条目
+- `POST /materials/stock/:id/check`：仅 admin，`{quantity,note?,expected_revision?}`；`revision` 不一致返回 409，成功写入核对历史（`kind=check`）并递增版本；第一次核对写 `baseline_at`
+- `GET /materials/stock/:id/checks?limit=10`：所有登录用户，最近盘点与入库历史（最多 50 条），每条带 `kind`（`check`/`inbound`）
+- `POST /materials/stock/templates`：仅 admin，按内置模板补建缺失槽位；返回 `{templates,created,skipped}`
+- `POST /materials/stock/sync`：仅 admin，匹配展示部门中尚未归入的启用采购记录：已知货号直接归入/排除，其余按规则给建议；返回 `{scanned,suggested,known,excluded,unmatched}`，不改库存数量；没有模板槽位时 400
+- `GET /materials/stock/links?view=pending|inbound|done`：仅 admin，核对工作台列表；返回 `{view,items,counts:{pending,inbound},slots}`
+- `POST /materials/stock/links/:materialId`：仅 admin，`{action:"confirm",stock_id?}` 确认/改归（同货号待确认记录一并处理，返回 `updated`）、`{action:"exclude"}` 排除、`{action:"stock",quantity?}` 基线后入库加数（默认采购数量）、`{action:"skip"}` 不加数；已入库记录不能改归属，非基线后记录不能入库
 - `GET /materials/reconcile/search?q=&months=2`：所有登录用户；按名称/品牌/规格（同时比较去空格文本）返回匹配的库存条目、最多 500 条采购记录、近 N 月 `recent/unreceived/partial` 标记、`suggested_material_ids`、`pending_material_ids`、`departments` 和 `summary.truncated`。只读，供 agent 核对
 - `POST /materials/reconcile`：所有登录用户，`{stock_id?,proposed_quantity?,material_ids?,note,confirmed:true}`；创建待审批请求，不立即改库存或采购标记。`stock_id` 与 `material_ids` 至少一个；库存已有待审批请求时 `409`
 - `GET /materials/reconcile?status=all|pending|approved|rejected&page=`：成员只看自己，admin 看全部；返回 `materials` 明细、`stock_changed`（提交后库存 revision 变化）

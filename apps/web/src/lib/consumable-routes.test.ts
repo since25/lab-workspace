@@ -4,7 +4,7 @@ import { MaterialError } from "./materials-data";
 
 const mocks = vi.hoisted(() => ({
   user: vi.fn(), transaction: vi.fn(), query: vi.fn(), listStock: vi.fn(), create: vi.fn(), update: vi.fn(),
-  check: vi.fn(), remove: vi.fn(), sync: vi.fn(), checks: vi.fn(),
+  check: vi.fn(), remove: vi.fn(), sync: vi.fn(), checks: vi.fn(), templates: vi.fn(), links: vi.fn(), decide: vi.fn(),
 }));
 vi.mock("./auth", () => ({ requireUser: mocks.user }));
 vi.mock("./db", () => ({ query: mocks.query, withTransaction: mocks.transaction, pool: { query: mocks.query } }));
@@ -13,7 +13,8 @@ vi.mock("./consumable-stock", async (importOriginal) => {
   return {
     ...actual,
     listStock: mocks.listStock, createStockItem: mocks.create, updateStockItem: mocks.update,
-    checkStock: mocks.check, deleteStockItem: mocks.remove, syncStockCandidates: mocks.sync, listChecks: mocks.checks,
+    checkStock: mocks.check, deleteStockItem: mocks.remove, matchPurchases: mocks.sync, listChecks: mocks.checks,
+    initSlotTemplates: mocks.templates, listLinks: mocks.links, decideLink: mocks.decide,
   };
 });
 import { GET as getStock, POST as createStock } from "../app/api/v1/materials/stock/route";
@@ -21,6 +22,9 @@ import { PATCH as patchStock, DELETE as removeStock } from "../app/api/v1/materi
 import { POST as checkStock } from "../app/api/v1/materials/stock/[id]/check/route";
 import { GET as getChecks } from "../app/api/v1/materials/stock/[id]/checks/route";
 import { POST as syncStock } from "../app/api/v1/materials/stock/sync/route";
+import { POST as initTemplates } from "../app/api/v1/materials/stock/templates/route";
+import { GET as getLinks } from "../app/api/v1/materials/stock/links/route";
+import { POST as decideLink } from "../app/api/v1/materials/stock/links/[id]/route";
 
 const context = (id = "1") => ({ params: Promise.resolve({ id }) });
 const url = (path: string) => `http://localhost${path}`;
@@ -59,25 +63,39 @@ describe("常用耗材库存入口权限", () => {
       removeStock(new Request(url("/api/v1/materials/stock/1"), { method: "DELETE" }), context()),
       checkStock(post("/api/v1/materials/stock/1/check", { quantity: 1 }), context()),
       syncStock(post("/api/v1/materials/stock/sync")),
+      initTemplates(post("/api/v1/materials/stock/templates")),
+      getLinks(new Request(url("/api/v1/materials/stock/links"))),
+      decideLink(post("/api/v1/materials/stock/links/1", { action: "exclude" }), context()),
     ];
     for (const response of await Promise.all(calls)) expect(response.status).toBe(403);
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.sync).not.toHaveBeenCalled();
+    expect(mocks.links).not.toHaveBeenCalled();
+    expect(mocks.decide).not.toHaveBeenCalled();
   });
-  it("管理员可新增、编辑、核对、删除和生成候选", async () => {
+  it("管理员可新增、编辑、核对、删除、建模板、匹配采购和处理核对工作台", async () => {
     mocks.user.mockResolvedValue({ id: 1, role: "admin" });
     mocks.create.mockResolvedValue({ id: 1 });
     mocks.update.mockResolvedValue({ id: 1 });
     mocks.check.mockResolvedValue({ id: 1, quantity: 2 });
     mocks.remove.mockResolvedValue({ deleted: 1 });
-    mocks.sync.mockResolvedValue({ scanned: 3, candidates: 1, created: 1, skipped: 0 });
+    mocks.sync.mockResolvedValue({ scanned: 3, suggested: 1, known: 0, excluded: 0, unmatched: 2 });
+    mocks.templates.mockResolvedValue({ templates: 58, created: 58, skipped: 0 });
+    mocks.links.mockResolvedValue({ view: "pending", items: [], counts: { pending: 0, inbound: 0 }, slots: [] });
+    mocks.decide.mockResolvedValue({ updated: 1 });
     expect((await createStock(post("/api/v1/materials/stock", { item_name: "示例吸头" }))).status).toBe(201);
     expect((await patchStock(patch("/api/v1/materials/stock/1", { note: "x" }), context())).status).toBe(200);
     expect((await checkStock(post("/api/v1/materials/stock/1/check", { quantity: 2 }), context())).status).toBe(200);
     expect((await removeStock(new Request(url("/api/v1/materials/stock/1"), { method: "DELETE" }), context())).status).toBe(200);
     expect((await syncStock(post("/api/v1/materials/stock/sync"))).status).toBe(200);
-    expect(mocks.transaction).toHaveBeenCalledTimes(5);
+    expect((await initTemplates(post("/api/v1/materials/stock/templates"))).status).toBe(200);
+    expect((await getLinks(new Request(url("/api/v1/materials/stock/links?view=inbound")))).status).toBe(200);
+    expect((await decideLink(post("/api/v1/materials/stock/links/9", { action: "stock", quantity: 2 }), context("9"))).status).toBe(200);
+    expect((await decideLink(post("/api/v1/materials/stock/links/x", { action: "stock" }), context("x"))).status).toBe(400);
+    expect(mocks.transaction).toHaveBeenCalledTimes(7);
+    expect(mocks.links.mock.calls[0][1].get("view")).toBe("inbound");
+    expect(mocks.decide.mock.calls[0].slice(1, 3)).toEqual([9, { action: "stock", quantity: 2 }]);
     expect(mocks.create.mock.calls[0][1]).toMatchObject({ item_name: "示例吸头" });
     expect(mocks.check.mock.calls[0][1]).toBe(1);
   });

@@ -1,4 +1,4 @@
-// 实际 React 页面配虚构 API；只检查新增的常用耗材库存交互，不连接工作台数据库。
+// 实际 React 页面配虚构 API；检查常用耗材槽位页与核对工作台的交互，不连接工作台数据库。
 import { build } from 'esbuild';
 import { chromium } from '../../oa-export/node_modules/playwright-core/index.mjs';
 import { createServer } from 'node:http';
@@ -29,7 +29,7 @@ const navStub = {
     build.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: 'navigation', namespace: 'test-navigation' }));
     build.onLoad(
       { filter: /.*/, namespace: 'test-navigation' },
-      () => ({ contents: "export function usePathname(){return new URLSearchParams(location.search).get('path') || location.pathname}", resolveDir: web })
+      () => ({ contents: "export function usePathname(){return new URLSearchParams(location.search).get('path') || location.pathname}export function useSearchParams(){return new URLSearchParams(location.search)}", resolveDir: web })
     );
   },
 };
@@ -60,7 +60,12 @@ import Page from './page.tsx';
 import '../../../globals.css';
 createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stockDir);
 
-  const routes = { '/before-stock': 'before-stock', '/materials/stock': 'stock' };
+  await bundle('review', `import { createRoot } from 'react-dom/client';
+import Page from './review/page.tsx';
+import '../../../globals.css';
+createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stockDir);
+
+  const routes = { '/before-stock': 'before-stock', '/materials/stock': 'stock', '/materials/stock/review': 'review' };
   server = createServer(async (req, res) => {
     const name = routes[new URL(req.url, 'http://localhost').pathname];
     if (req.url.startsWith('/js/') || req.url.startsWith('/css/')) {
@@ -84,35 +89,64 @@ createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stoc
   page.on('pageerror', (e) => errors.push(e.message));
 
   let role = 'member';
-  let nextId = 6;
-  const categoryNames = [
-    '普通用品/手套', '塑料耗材/吸头', '塑料耗材/培养板皿', '塑料耗材/PCR板连管封膜', '生物试剂/培养基', '生物试剂/转染', '试剂盒/检测试剂盒', '其他',
-  ];
-  const groupOf = (c) => c.split('/')[0];
-  const groupNames = [...new Set(categoryNames.map(groupOf))];
+  let nextId = 100;
   const stamp = '2026-10-18T02:00:00Z';
   const old = '2026-08-01T02:00:00Z';
-  const base = { note: '', updated_at: stamp, monthly_usage: null, last_purchase: null };
+  const categoryNames = ['细胞耗材/细胞培养板', '细胞耗材/培养皿', '塑料耗材/吸头', '塑料耗材/离心管', '通用耗材/手套', '培养基/基础培养基', '培养基/添加物', '常用试剂/单品', '其他'];
+  const groupOf = (c) => c.split('/')[0];
+  const groupNames = [...new Set(categoryNames.map(groupOf))];
+  const slot = (id, category, item_name, unit, extra = {}) => ({
+    id, category, item_name, brand: '', spec_model: '', unit, quantity: 0, note: '', last_checked_at: null, checked_by_name: null,
+    updated_at: stamp, revision: 0, status: 'stale', stale: true, slot_key: `example-${id}`, baseline_at: null, skus: [],
+    monthly_usage: null, usage_basis: null, last_purchase: null, pending_inbound: 0, ...extra,
+  });
   let items = [
-    { ...base, id: 1, category: '塑料耗材/吸头', item_name: '200ul 滤芯吸头', brand: '示例品牌', spec_model: 'EXAMPLE-TIP-200', unit: '盒', quantity: 4, note: '放在细胞房第二层', last_checked_at: stamp, checked_by_name: '示例管理员', revision: 2, status: 'ok', stale: false, monthly_usage: 2.5, last_purchase: { on: '2026-09-01', quantity: 5, unit: '盒' } },
-    { ...base, id: 2, category: '塑料耗材/培养板皿', item_name: '24孔细胞培养板', brand: '示例品牌', spec_model: 'EXAMPLE-PLATE-24', unit: '箱', quantity: 0, last_checked_at: stamp, checked_by_name: '示例管理员', revision: 1, status: 'out', stale: false, last_purchase: { on: '2026-06-20', quantity: 1, unit: '箱' } },
-    { ...base, id: 3, category: '塑料耗材/PCR板连管封膜', item_name: '8连管', brand: '示例品牌', spec_model: 'EXAMPLE-STRIP', unit: '箱', quantity: 0, last_checked_at: null, checked_by_name: null, revision: 0, status: 'stale', stale: true },
-    { ...base, id: 4, category: '生物试剂/培养基', item_name: 'DMEM 高糖培养基', brand: '示例品牌', spec_model: 'EXAMPLE-DMEM', unit: '瓶', quantity: 12, note: '4℃ 保存', last_checked_at: old, checked_by_name: '示例管理员', revision: 3, status: 'stale', stale: true, monthly_usage: 6, last_purchase: { on: '2026-08-15', quantity: 10, unit: '瓶' } },
-    { ...base, id: 5, category: '试剂盒/检测试剂盒', item_name: '示例 ELISA 试剂盒', brand: '示例品牌', spec_model: 'EXAMPLE-EK 96T', unit: '盒', quantity: 2, last_checked_at: stamp, checked_by_name: '示例管理员', revision: 1, status: 'ok', stale: false },
+    slot(1, '细胞耗材/细胞培养板', '24孔板 TC', '箱', { quantity: 0, last_checked_at: stamp, baseline_at: old, checked_by_name: '示例管理员', revision: 2, status: 'out', stale: false,
+      skus: [{ item_name: '24孔细胞培养板，平底，TC', brand: '示例品牌甲', spec_model: 'EXAMPLE-P24' }, { item_name: '24孔板', brand: '示例品牌乙', spec_model: 'EXAMPLE-Q24' }],
+      monthly_usage: 1.2, usage_basis: 'checks', last_purchase: { on: '2026-09-01', quantity: 2, unit: '箱' } }),
+    slot(2, '细胞耗材/细胞培养板', '48孔板 TC', '箱'),
+    slot(3, '塑料耗材/吸头', '200µL 滤芯吸头', '箱', { quantity: 3, last_checked_at: stamp, baseline_at: old, checked_by_name: '示例管理员', revision: 1, status: 'ok', stale: false,
+      skus: [{ item_name: '200ul吸头滤芯', brand: '示例品牌甲', spec_model: 'EXAMPLE-TF200' }], monthly_usage: 0.8, usage_basis: 'purchases',
+      last_purchase: { on: '2026-10-10', quantity: 2, unit: '箱' }, pending_inbound: 1 }),
+    slot(4, '塑料耗材/离心管', '1.5mL 离心管', '箱'),
+    slot(5, '培养基/基础培养基', 'DMEM 高糖', '瓶', { quantity: 12, last_checked_at: old, baseline_at: old, checked_by_name: '示例管理员', revision: 3, status: 'stale' }),
+    slot(6, '常用试剂/单品', 'QuickExtract DNA 提取液', '瓶', { brand: 'Lucigen', quantity: 2, last_checked_at: stamp, baseline_at: stamp, status: 'ok', stale: false }),
   ];
   const checks = [
-    { id: 2, stock_id: 1, before_qty: 10, after_qty: 4, note: '本周用掉 6 盒', checked_at: stamp, checked_by_name: '示例管理员' },
-    { id: 1, stock_id: 1, before_qty: 0, after_qty: 10, note: '建立库存', checked_at: '2026-10-01T02:00:00Z', checked_by_name: '示例管理员' },
+    { id: 3, stock_id: 3, before_qty: 1, after_qty: 3, note: '入库：EXAMPLE-REQ-9 200ul吸头滤芯', checked_at: stamp, checked_by_name: '示例管理员', kind: 'inbound' },
+    { id: 2, stock_id: 3, before_qty: 4, after_qty: 1, note: '月度盘点', checked_at: '2026-10-01T02:00:00Z', checked_by_name: '示例管理员', kind: 'check' },
+    { id: 1, stock_id: 3, before_qty: 0, after_qty: 4, note: '建立基线', checked_at: old, checked_by_name: '示例管理员', kind: 'check' },
   ];
-  // 改动前页面用的旧接口形状：五类、四种状态、安全库存。
+  const link = (material_id, state, confidence, stock_id, item_name, extra = {}) => {
+    const s = items.find((i) => i.id === stock_id);
+    return {
+      material_id, state, confidence, stock_id, slot_label: s ? `${s.category} · ${s.item_name}` : '', slot_unit: s?.unit ?? '',
+      item_name, brand: '示例品牌甲', spec_model: `EXAMPLE-${material_id}`, unit: '箱', quantity: 2, request_no: `EXAMPLE-REQ-${material_id}`,
+      minor_category: '耗材', requested_on: '2026-10-10', last_received_on: null, receipt_status: '未收货', applied_qty: null,
+      decided_by_name: null, decided_at: null, ...extra,
+    };
+  };
+  let links = [
+    link(11, 'pending', 'high', 1, '24孔细胞培养板，平底，TC'),
+    link(12, 'pending', 'high', 1, '24孔细胞培养板 透明盖'),
+    link(14, 'pending', 'low', 4, '示例 转染试剂 1.5ml', { minor_category: '生物试剂', unit: '盒' }),
+    link(13, 'pending', 'mid', 5, 'DMEM 培养基', { unit: '瓶' }),
+    link(21, 'confirmed', 'known', 3, '200ul吸头滤芯', { last_received_on: '2026-10-12', receipt_status: '全部收货' }),
+    link(22, 'confirmed', 'known', 1, '24孔板', { unit: '包', quantity: 5 }),
+  ];
+  const inboundView = () => links.filter((l) => l.state === 'confirmed' && l.stock_id && items.find((i) => i.id === l.stock_id)?.baseline_at);
+  const counts = () => ({ pending: links.filter((l) => l.state === 'pending').length, inbound: inboundView().length });
+  // 改动前页面（HEAD）用的接口形状：按货号的条目、品牌/规格列、参考消耗与最近采购。
+  const legacyItems = [
+    { id: 1, category: '塑料耗材/吸头', item_name: '200ul吸头滤芯低吸附盒装灭菌', brand: '示例品牌甲', spec_model: 'EXAMPLE-TF200', unit: '箱', quantity: 0, note: '由采购记录生成，待首次核对', last_checked_at: null, checked_by_name: null, updated_at: stamp, revision: 0, status: 'stale', stale: true, monthly_usage: null, last_purchase: { on: '2026-06-01', quantity: 2, unit: '箱' } },
+    { id: 2, category: '塑料耗材/吸头', item_name: '200μl 叠装短吸头', brand: '示例品牌乙', spec_model: 'EXAMPLE-T200', unit: '箱', quantity: 0, note: '由采购记录生成，待首次核对', last_checked_at: null, checked_by_name: null, updated_at: stamp, revision: 0, status: 'stale', stale: true, monthly_usage: 0.5, last_purchase: { on: '2026-06-01', quantity: 2, unit: '箱' } },
+    { id: 3, category: '塑料耗材/培养板皿', item_name: '24孔细胞培养板，平底，TC', brand: '示例品牌甲', spec_model: 'EXAMPLE-P24', unit: '箱', quantity: 0, note: '由采购记录生成，待首次核对', last_checked_at: null, checked_by_name: null, updated_at: stamp, revision: 0, status: 'stale', stale: true, monthly_usage: null, last_purchase: null },
+  ];
+  const legacySummary = { item_count: 3, out_count: 0, stale_count: 3, last_checked_at: null };
   const legacy = {
-    categories: ['吸头', '细胞培养板', '移液管', '离心管', '培养基'].map((name, i) => ({ name, item_count: [1, 1, 0, 0, 1][i], unchecked_count: 0, out_count: i === 1 ? 1 : 0, low_count: 0, stale_count: 0, last_checked_at: stamp })),
-    items: [
-      { id: 1, category: '吸头', item_name: '200ul 滤芯吸头', brand: '示例品牌', spec_model: 'EXAMPLE-TIP-200', unit: '盒', quantity: 4, safety_stock: 0, note: '放在细胞房第二层', last_checked_at: stamp, checked_by_name: '示例管理员', updated_at: stamp, revision: 2, status: 'ok', stale: false },
-      { id: 2, category: '细胞培养板', item_name: '24孔细胞培养板', brand: '示例品牌', spec_model: 'EXAMPLE-PLATE-24', unit: '箱', quantity: 0, safety_stock: 0, note: '', last_checked_at: stamp, checked_by_name: '示例管理员', updated_at: stamp, revision: 1, status: 'out', stale: false },
-      { id: 4, category: '培养基', item_name: 'DMEM 高糖培养基', brand: '示例品牌', spec_model: 'EXAMPLE-DMEM', unit: '瓶', quantity: 12, safety_stock: 0, note: '4℃ 保存', last_checked_at: stamp, checked_by_name: '示例管理员', updated_at: stamp, revision: 3, status: 'ok', stale: false },
-    ],
-    summary: { item_count: 3, unchecked_count: 0, out_count: 1, low_count: 0, stale_count: 0, last_checked_at: stamp }, stale_days: 30,
+    groups: ['普通用品', '塑料耗材', '生物试剂', '试剂盒', '其他'].map((name) => ({ name, ...(name === '塑料耗材' ? legacySummary : { item_count: 0, out_count: 0, stale_count: 0, last_checked_at: null }) })),
+    categories: [{ name: '塑料耗材/吸头', item_count: 2, out_count: 0, stale_count: 2, last_checked_at: null }, { name: '塑料耗材/培养板皿', item_count: 1, out_count: 0, stale_count: 1, last_checked_at: null }],
+    items: legacyItems, summary: legacySummary, stale_days: 30,
   };
 
   const summarize = (list) => ({
@@ -121,6 +155,7 @@ createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stoc
     stale_count: list.filter((i) => i.status === 'stale').length,
     last_checked_at: list.map((i) => i.last_checked_at).filter(Boolean).sort().at(-1) ?? null,
   });
+  const linkRequests = [];
 
   await context.route('**/api/v1/**', async (route) => {
     const req = route.request();
@@ -139,25 +174,44 @@ createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stoc
       result = {
         groups: groupNames.map((name) => ({ name, ...summarize(searched.filter((i) => groupOf(i.category) === name)) })),
         categories: categoryNames.map((name) => ({ name, ...summarize(searched.filter((i) => i.category === name)) })),
-        items: visible, summary: summarize(searched), stale_days: 30,
+        items: visible, summary: summarize(searched), stale_days: 30, review: counts(),
       };
     } else if (url.pathname === '/api/v1/materials/stock' && req.method() === 'POST') {
       const body = req.postDataJSON();
-      assert.ok(!('safety_stock' in body), '新增请求不应再带安全库存');
       const counted = body.quantity !== undefined && body.quantity !== null && body.quantity !== '';
-      const item = {
-        ...base, id: nextId++, category: body.category, item_name: body.item_name, brand: body.brand || '', spec_model: body.spec_model || '',
-        unit: body.unit || '', quantity: counted ? Number(body.quantity) : 0, note: body.note || '',
-        last_checked_at: counted ? new Date().toISOString() : null, checked_by_name: counted ? '示例管理员' : null,
-        updated_at: new Date().toISOString(), revision: 0,
-      };
-      item.status = !counted ? 'stale' : item.quantity <= 0 ? 'out' : 'ok';
-      item.stale = !counted;
+      const item = slot(nextId++, body.category, body.item_name, body.unit || '', {
+        brand: body.brand || '', spec_model: body.spec_model || '', note: body.note || '', slot_key: null,
+        quantity: counted ? Number(body.quantity) : 0, last_checked_at: counted ? new Date().toISOString() : null,
+      });
       items.push(item);
       status = 201;
       result = item;
+    } else if (url.pathname === '/api/v1/materials/stock/templates') {
+      result = { templates: 58, created: 52, skipped: 6 };
     } else if (url.pathname === '/api/v1/materials/stock/sync') {
-      result = { scanned: 749, candidates: 28, created: 26, skipped: 2 };
+      result = { scanned: 886, suggested: 190, known: 0, excluded: 0, unmatched: 696 };
+    } else if (url.pathname === '/api/v1/materials/stock/links') {
+      const view = url.searchParams.get('view');
+      const rows = view === 'pending' ? links.filter((l) => l.state === 'pending') : view === 'inbound' ? inboundView() : links.filter((l) => ['stocked', 'skipped', 'excluded'].includes(l.state));
+      result = { view, items: rows, counts: counts(), slots: items.map(({ id, category, item_name, unit }) => ({ id, category, item_name, unit })) };
+    } else if (/\/materials\/stock\/links\/\d+$/.test(url.pathname)) {
+      const id = Number(url.pathname.split('/').at(-1));
+      const body = req.postDataJSON();
+      linkRequests.push([id, body]);
+      const row = links.find((l) => l.material_id === id);
+      if (body.action === 'confirm') {
+        // 同货号（示例里 11 和 12 视为同一货号）一并归入。
+        const same = id === 11 ? [11, 12] : [id];
+        for (const l of links.filter((x) => same.includes(x.material_id))) Object.assign(l, { state: 'confirmed', stock_id: body.stock_id });
+        result = { updated: same.length };
+      } else if (body.action === 'exclude') { row.state = 'excluded'; row.stock_id = null; row.slot_label = ''; result = { updated: 1 }; }
+      else if (body.action === 'stock') {
+        const s = items.find((i) => i.id === row.stock_id);
+        s.quantity += Number(body.quantity ?? row.quantity);
+        s.pending_inbound = Math.max(0, s.pending_inbound - 1);
+        Object.assign(row, { state: 'stocked', applied_qty: Number(body.quantity ?? row.quantity), decided_by_name: '示例管理员', decided_at: new Date().toISOString() });
+        result = { updated: 1, stock: s };
+      } else { Object.assign(row, { state: 'skipped', decided_by_name: '示例管理员', decided_at: new Date().toISOString() }); result = { updated: 1 }; }
     } else if (/\/materials\/stock\/\d+\/check$/.test(url.pathname)) {
       const id = Number(url.pathname.split('/').at(-2));
       const item = items.find((i) => i.id === id);
@@ -169,9 +223,9 @@ createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stoc
       item.status = item.quantity <= 0 ? 'out' : 'ok';
       item.stale = false;
       item.last_checked_at = new Date().toISOString();
+      item.baseline_at ??= item.last_checked_at;
       item.checked_by_name = '示例管理员';
-      item.updated_at = item.last_checked_at;
-      checks.unshift({ id: checks.length + 1, stock_id: id, before_qty: before, after_qty: item.quantity, note: body.note || '', checked_at: item.last_checked_at, checked_by_name: '示例管理员' });
+      checks.unshift({ id: checks.length + 1, stock_id: id, before_qty: before, after_qty: item.quantity, note: body.note || '', checked_at: item.last_checked_at, checked_by_name: '示例管理员', kind: 'check' });
       result = item;
     } else if (/\/materials\/stock\/\d+\/checks$/.test(url.pathname)) {
       const id = Number(url.pathname.split('/').at(-2));
@@ -180,12 +234,7 @@ createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stoc
       const id = Number(url.pathname.split('/').at(-1));
       const index = items.findIndex((i) => i.id === id);
       if (req.method() === 'DELETE') { items = items.filter((i) => i.id !== id); result = { deleted: 1 }; }
-      else {
-        const body = req.postDataJSON();
-        assert.ok(!('safety_stock' in body), '编辑请求不应再带安全库存');
-        items[index] = { ...items[index], ...body, revision: items[index].revision + 1 };
-        result = items[index];
-      }
+      else { items[index] = { ...items[index], ...req.postDataJSON(), revision: items[index].revision + 1 }; result = items[index]; }
     } else throw new Error(`Unexpected fixture route: ${url.pathname}`);
     await route.fulfill({ status, json: result });
   });
@@ -193,93 +242,126 @@ createRoot(document.getElementById('root')).render(<main><Page/></main>);`, stoc
   await mkdir(output, { recursive: true });
   role = 'admin';
   await page.goto(`${origin}/before-stock`);
-  await page.locator('tbody tr').filter({ hasText: '200ul 滤芯吸头' }).waitFor();
+  await page.locator('tbody tr').filter({ hasText: '200μl 叠装短吸头' }).waitFor();
   await page.screenshot({ path: join(output, 'before-stock.png'), fullPage: true });
-  role = 'member';
 
+  // 成员：只读，看得到待入库提示但没有管理按钮。
+  role = 'member';
   await page.goto(`${origin}/materials/stock`);
   await page.getByRole('heading', { name: '常用耗材库存' }).waitFor();
-  await page.locator('tbody tr').filter({ hasText: '200ul 滤芯吸头' }).waitFor();
-  assert.equal(await page.locator('tbody tr').count(), 5);
+  await page.locator('tbody tr').filter({ hasText: '200µL 滤芯吸头' }).waitFor();
+  assert.equal(await page.locator('tbody tr').count(), 6);
   const tabs = (await page.locator('.tabs button').allTextContents()).map((t) => t.replace(/[\d⚠]+/g, '').trim());
-  assert.deepEqual(tabs, ['全部', '普通用品', '塑料耗材', '生物试剂', '试剂盒', '其他'], '标签卡应为全部 + 四大类 + 其他');
+  assert.deepEqual(tabs, ['全部', '细胞耗材', '塑料耗材', '通用耗材', '培养基', '常用试剂', '其他'], '标签卡应为全部 + 五大类 + 其他');
   const headers = (await page.locator('thead th').allTextContents()).map((t) => t.trim());
-  assert.deepEqual(headers, ['类别', '耗材名称', '品牌', '规格型号', '单位', '当前库存', '状态', '最近核对', '参考消耗/月*', '最近采购*', '操作']);
-  assert.equal(await page.getByText('安全库存').count(), 0, '页面不应再出现安全库存');
-  assert.equal(await page.getByText('未设', { exact: true }).count(), 0);
-  const tipRow = page.locator('tbody tr').filter({ hasText: '200ul 滤芯吸头' });
-  assert.equal((await tipRow.locator('td').nth(0).textContent()).trim(), '塑料耗材吸头', '类别列显示大类和子类标签');
-  assert.equal((await tipRow.locator('td').nth(8).textContent()).trim(), '2.5 盒');
-  assert.equal((await tipRow.locator('td').nth(9).textContent()).trim(), '2026-09-015 盒');
-  const kitRow = page.locator('tbody tr').filter({ hasText: '示例 ELISA 试剂盒' });
-  assert.equal((await kitRow.locator('td').nth(8).textContent()).trim(), '', '无采购历史时参考消耗为空');
-  assert.equal((await kitRow.locator('td').nth(9).textContent()).trim(), '', '无采购历史时最近采购为空');
+  assert.deepEqual(headers, ['类别', '槽位', '已挂货号', '单位', '当前库存', '状态', '最近核对', '消耗/月', '最近采购', '操作']);
   const statusOf = async (name) => (await page.locator('tbody tr').filter({ hasText: name }).locator('.stock-status').textContent()).trim();
-  assert.equal(await statusOf('24孔细胞培养板'), '已用完');
-  assert.equal(await statusOf('8连管'), '需复核');
-  assert.equal(await statusOf('DMEM 高糖培养基'), '需复核');
-  assert.equal(await statusOf('200ul 滤芯吸头'), '正常');
-  assert.deepEqual(await page.locator('select').first().locator('option').allTextContents(), ['全部状态', '已用完', '需复核', '正常']);
-  assert.equal(await page.getByRole('button', { name: '新增耗材', exact: true }).count(), 0, '成员不应看到新增按钮');
-  assert.equal(await page.getByRole('button', { name: '核对', exact: true }).count(), 0, '成员不应看到核对按钮');
+  assert.equal(await statusOf('24孔板 TC'), '需采购');
+  assert.equal(await statusOf('48孔板 TC'), '需复核');
+  assert.equal(await statusOf('200µL 滤芯吸头'), '正常');
+  assert.deepEqual(await page.locator('select').first().locator('option').allTextContents(), ['全部状态', '需采购', '需复核', '正常']);
+  const plateRow = page.locator('tbody tr').filter({ hasText: '24孔板 TC' });
+  assert.equal((await plateRow.locator('td').nth(2).locator('summary').textContent()).trim(), '2 个');
+  await plateRow.locator('summary').click();
+  await plateRow.getByText('示例品牌乙 EXAMPLE-Q24').waitFor();
+  assert.equal((await plateRow.locator('td').nth(7).textContent()).trim(), '1.2 箱', '盘点得出的消耗不带 *');
+  assert.match(await plateRow.locator('td').nth(6).textContent(), /基线/);
+  const tipRow = page.locator('tbody tr').filter({ hasText: '200µL 滤芯吸头' });
+  assert.equal((await tipRow.locator('td').nth(7).textContent()).trim(), '0.8 箱*', '采购估算的消耗带 *');
+  assert.match(await tipRow.locator('td').nth(5).textContent(), /待入库 1/);
+  assert.equal(await page.getByRole('button', { name: '建立槽位模板' }).count(), 0, '成员不应看到建模板');
+  assert.equal(await page.getByRole('link', { name: /核对工作台/ }).count(), 0, '成员不应看到核对工作台入口');
+  assert.equal(await page.getByRole('button', { name: '核对', exact: true }).count(), 0);
   await page.screenshot({ path: join(output, 'member-stock.png'), fullPage: true });
 
-  await page.locator('.tabs button').filter({ hasText: '塑料耗材' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 3);
-  await page.screenshot({ path: join(output, 'tab-plastic.png'), fullPage: true });
-  await page.locator('.tabs button').filter({ hasText: '试剂盒' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1);
+  await page.locator('.tabs button').filter({ hasText: '细胞耗材' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 2);
+  await page.screenshot({ path: join(output, 'tab-cell.png'), fullPage: true });
   await page.locator('.tabs button').filter({ hasText: '全部' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 5);
+  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 6);
 
+  // 管理员：建模板、匹配采购、首次核对即基线、历史区分盘点/入库。
   role = 'admin';
   await page.reload();
-  await page.getByRole('button', { name: '新增耗材', exact: true }).waitFor();
-  await page.locator('tbody tr').filter({ hasText: '200ul 滤芯吸头' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '核对', exact: true }).count(), 5);
+  await page.getByRole('button', { name: '新增槽位', exact: true }).waitFor();
+  await page.getByRole('link', { name: /核对工作台/ }).waitFor();
+  assert.equal((await page.locator('a .badge').textContent()).trim(), '6', '工作台角标 = 待确认 + 待入库');
+  await page.locator('tbody tr').filter({ hasText: '200µL 滤芯吸头' }).waitFor();
   await page.screenshot({ path: join(output, 'admin-stock.png'), fullPage: true });
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: '建立槽位模板' }).click();
+  await page.getByRole('status').filter({ hasText: '新建 52 个' }).waitFor();
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: '匹配采购记录' }).click();
+  await page.getByRole('status').filter({ hasText: '待确认 190 条' }).waitFor();
 
-  const stripRow = page.locator('tbody tr').filter({ hasText: '8连管' });
-  await stripRow.getByRole('button', { name: '核对', exact: true }).click();
-  await page.getByRole('heading', { name: '核对库存：8连管' }).waitFor();
-  await page.getByLabel('实际数量').fill('6');
-  await page.getByLabel('备注（领用、报损、盘点说明）').fill('首次盘点');
+  const emptyRow = page.locator('tbody tr').filter({ hasText: '48孔板 TC' });
+  await emptyRow.getByRole('button', { name: '核对', exact: true }).click();
+  await page.getByRole('heading', { name: '核对库存：48孔板 TC' }).waitFor();
+  await page.getByText('将作为基线').waitFor();
+  await page.getByLabel('实际数量').fill('2');
   await page.getByRole('button', { name: '保存核对' }).click();
   await page.getByRole('status').filter({ hasText: '已核对' }).waitFor();
   await page.waitForFunction(() => {
-    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.textContent?.includes('8连管'));
-    return row?.querySelectorAll('td')[5]?.textContent?.trim() === '6' && row.querySelector('.stock-status')?.textContent === '正常';
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.textContent?.includes('48孔板 TC'));
+    return row?.querySelectorAll('td')[4]?.textContent?.trim() === '2' && row.textContent.includes('基线');
   });
+  await tipRow.getByRole('button', { name: '历史', exact: true }).click();
+  await page.getByRole('heading', { name: '核对历史：200µL 滤芯吸头' }).waitFor();
+  await page.locator('.dialog tbody tr').filter({ hasText: '月度盘点' }).waitFor();
+  assert.deepEqual(await page.locator('.dialog tbody tr td:nth-child(2)').allTextContents(), ['入库', '盘点', '盘点']);
+  await page.getByRole('button', { name: '关闭' }).click();
 
-  await page.getByRole('button', { name: '新增耗材', exact: true }).click();
-  await page.getByRole('heading', { name: '新增耗材', exact: true }).waitFor();
-  assert.equal(await page.getByLabel('安全库存').count(), 0, '新增表单不应有安全库存');
-  assert.deepEqual(await page.locator('.dialog select optgroup').evaluateAll((g) => g.map((x) => x.label)), ['普通用品', '塑料耗材', '生物试剂', '试剂盒']);
-  await page.locator('.dialog select').selectOption('塑料耗材/吸头');
-  await page.getByLabel('名称', { exact: true }).fill('1000ul 吸头');
-  await page.getByLabel('品牌', { exact: true }).fill('示例品牌');
-  await page.getByLabel('规格型号', { exact: true }).fill('EXAMPLE-TIP-1000');
-  await page.getByLabel('单位', { exact: true }).fill('盒');
+  await page.getByRole('button', { name: '新增槽位', exact: true }).click();
+  await page.getByRole('heading', { name: '新增槽位', exact: true }).waitFor();
+  await page.locator('.dialog select').selectOption('常用试剂/单品');
+  await page.getByLabel('槽位名称').fill('示例单品试剂');
+  await page.getByLabel('单位（按采购单位，如箱）').fill('盒');
   await page.screenshot({ path: join(output, 'admin-create.png'), fullPage: true });
   await page.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: '已新增耗材' }).waitFor();
-  const newRow = page.locator('tbody tr').filter({ hasText: '1000ul 吸头' });
-  await newRow.getByText('需复核', { exact: true }).waitFor();
+  await page.getByRole('status').filter({ hasText: '已新增槽位' }).waitFor();
 
-  await newRow.getByRole('button', { name: '编辑', exact: true }).click();
-  await page.getByRole('heading', { name: '编辑耗材：1000ul 吸头' }).waitFor();
-  assert.equal(await page.getByLabel('安全库存').count(), 0, '编辑表单不应有安全库存');
-  await page.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: '已保存耗材信息' }).waitFor();
+  // 核对工作台：待确认（同货号一并确认、改归、排除）→ 待入库（入库、不加数）→ 已处理。
+  await page.goto(`${origin}/materials/stock/review`);
+  await page.getByRole('heading', { name: '核对工作台' }).waitFor();
+  await page.locator('tbody tr').filter({ hasText: 'DMEM 培养基' }).waitFor();
+  assert.deepEqual(await page.locator('tr.stock-group td').allTextContents(), ['细胞耗材/细胞培养板 · 24孔板 TC　按 箱 计', '塑料耗材/离心管 · 1.5mL 离心管　按 箱 计', '培养基/基础培养基 · DMEM 高糖　按 瓶 计']);
+  const confidence = async (name) => (await page.locator('tbody tr').filter({ hasText: name }).locator('.stock-status').textContent()).trim();
+  assert.equal(await confidence('DMEM 培养基'), '中');
+  assert.equal(await confidence('示例 转染试剂'), '低');
+  await page.screenshot({ path: join(output, 'review-pending.png'), fullPage: true });
+  await page.locator('tbody tr').filter({ hasText: '24孔细胞培养板，平底，TC' }).getByRole('button', { name: '确认' }).click();
+  await page.getByRole('status').filter({ hasText: '同货号另外 1 条一并处理' }).waitFor();
+  const dmem = page.locator('tbody tr').filter({ hasText: 'DMEM 培养基' });
+  await dmem.locator('select').selectOption({ label: 'DMEM 高糖（瓶）' });
+  await dmem.getByRole('button', { name: '确认' }).click();
+  await page.getByRole('status').filter({ hasText: '已确认归属：DMEM 培养基' }).waitFor();
+  await page.locator('tbody tr').filter({ hasText: '示例 转染试剂' }).getByRole('button', { name: '排除' }).click();
+  await page.getByText('没有待确认的采购记录').waitFor();
 
-  page.once('dialog', (d) => d.accept());
-  await page.getByRole('button', { name: '从采购记录生成候选', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: '匹配 28 条' }).waitFor();
+  await page.locator('.tabs button').filter({ hasText: '待入库' }).click();
+  const inboundTip = page.locator('tbody tr').filter({ hasText: '200ul吸头滤芯' });
+  await inboundTip.waitFor();
+  const odd = page.locator('tbody tr').filter({ hasText: 'EXAMPLE-22' });
+  assert.match(await odd.textContent(), /≠ 槽位单位 箱/, '采购单位与槽位不同要提示');
+  await page.screenshot({ path: join(output, 'review-inbound.png'), fullPage: true });
+  await inboundTip.locator('input').fill('3');
+  await inboundTip.getByRole('button', { name: '入库' }).click();
+  await page.getByRole('status').filter({ hasText: '已入库' }).waitFor();
+  await odd.getByRole('button', { name: '不加数' }).click();
+  await page.getByRole('status').filter({ hasText: '已标记不加数' }).waitFor();
+  await page.locator('.tabs button').filter({ hasText: '已处理' }).click();
+  await page.locator('tbody tr').filter({ hasText: '已入库' }).waitFor();
+  await page.screenshot({ path: join(output, 'review-done.png'), fullPage: true });
+  assert.deepEqual(linkRequests.map(([id, b]) => [id, b.action, b.stock_id ?? b.quantity ?? null]), [
+    [11, 'confirm', 1], [13, 'confirm', 5], [14, 'exclude', null], [21, 'stock', '3'], [22, 'skip', null],
+  ]);
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({
     status: 'passed',
-    checks: ['改动前截图（HEAD 页面）', '标签卡为全部+四大类+其他并按大类过滤', '列顺序与品牌/规格拆列', '类别列显示子类标签', '参考消耗/月与最近采购显示及空值', '三态状态与筛选项', '无安全库存列与表单项', '成员只读', '管理员核对后状态变正常', '新增按大类分组选择子类、默认需复核', '编辑不带安全库存', '从采购记录生成候选'],
+    checks: ['改动前截图（HEAD 页面）', '标签卡为全部+五大类+其他', '槽位列与已挂货号展开', '需采购/需复核/正常与筛选项', '消耗/月区分盘点与采购估算', '待入库提示', '成员只读无工作台入口',
+      '建立槽位模板与匹配采购', '首次核对成为基线', '历史区分盘点与入库', '新增单品槽位', '工作台按槽位分组与把握', '同货号一并确认、改归、排除', '入库改数量、单位不符提示、不加数', '已处理列表'],
     screenshots: output,
   }));
 } finally {

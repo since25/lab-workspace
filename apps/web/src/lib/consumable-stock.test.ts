@@ -4,13 +4,11 @@ import { PGlite } from "@electric-sql/pglite";
 import type { PoolClient } from "pg";
 import { MaterialError } from "./materials-data";
 import type { MaterialQuery } from "./materials-list";
+import { normalizeStockText, stockCategories, stockGroups, stockStale, stockStatus, STOCK_STALE_DAYS } from "./consumables";
 import {
-  classifyConsumable, normalizeStockText, stockCategories, stockGroups, stockStale, stockStatus,
-  STOCK_STALE_DAYS,
-} from "./consumables";
-import {
-  checkStock, createStockItem, deleteStockItem, listChecks, listStock, syncStockCandidates, updateStockItem,
+  checkStock, createStockItem, decideLink, deleteStockItem, initSlotTemplates, listChecks, listLinks, listStock, matchPurchases, updateStockItem,
 } from "./consumable-stock";
+import { SLOT_TEMPLATES } from "./consumable-slots";
 
 // 全部名称和数量均为虚构；数据库只在进程内存在。
 const db = new PGlite();
@@ -31,60 +29,34 @@ beforeAll(async () => {
   await db.exec(await readFile(new URL("../../../../db/migrations/009_material_usage.sql", import.meta.url), "utf8"));
   await db.exec(await readFile(new URL("../../../../db/migrations/011_consumable_stock.sql", import.meta.url), "utf8"));
   await db.exec(await readFile(new URL("../../../../db/migrations/012_stock_reconcile.sql", import.meta.url), "utf8"));
+  await db.exec(await readFile(new URL("../../../../db/migrations/013_consumable_slots.sql", import.meta.url), "utf8"));
   await db.exec("INSERT INTO users(id,username,display_name,password_hash,role) VALUES (1,'example-admin','示例管理员','example-hash','admin'),(2,'example-member','示例成员','example-hash','member')");
 }, 30000);
 beforeEach(async () => {
-  await db.exec("TRUNCATE consumable_stock, consumable_stock_checks, material_items, audit_logs RESTART IDENTITY CASCADE");
+  await db.exec("TRUNCATE consumable_stock, consumable_stock_checks, consumable_stock_skus, consumable_stock_links, material_items, audit_logs RESTART IDENTITY CASCADE");
 });
 afterAll(() => db.close());
 
 describe("类别配置与分类", () => {
-  it("默认类别为四大类 + 其他，大类下共 20 个子类，名称唯一", () => {
-    expect(stockGroups(builtin)).toEqual(["普通用品", "塑料耗材", "生物试剂", "试剂盒", "其他"]);
-    expect(builtin.filter((c) => c.name.includes("/"))).toHaveLength(20);
+  it("默认类别来自槽位模板：五个大类 + 其他，名称唯一，每个模板槽位的类别都在其中", () => {
+    expect(stockGroups(builtin)).toEqual(["细胞耗材", "塑料耗材", "通用耗材", "培养基", "常用试剂", "其他"]);
     expect(new Set(builtin.map((c) => c.name)).size).toBe(builtin.length);
+    expect(SLOT_TEMPLATES.every((t) => builtin.some((c) => c.name === t.category))).toBe(true);
   });
-  it("配置支持只写名称（沿用内置关键词）和自定义关键词，标签卡随配置的大类变化", () => {
+  it("配置支持只写名称或带 keywords 的旧格式，标签卡随配置的大类变化", () => {
     const names = stockCategories('[" 塑料耗材/吸头 ","示例类别"]');
     expect(names.map((c) => c.name)).toEqual(["塑料耗材/吸头", "示例类别"]);
     expect(stockGroups(names)).toEqual(["塑料耗材", "示例类别"]);
-    expect(names[0].keywords).toContain("吸头");
-    expect(names[1].keywords).toEqual([]);
-    const custom = stockCategories('[{"name":"耗材甲","keywords":[" 特别耗材 ","EXAMPLE"]}]');
-    expect(custom[0].keywords).toEqual(["特别耗材", "example"]);
-    expect(classifyConsumable("特别耗材 500ml", custom)).toBe("耗材甲");
+    const legacy = stockCategories('[{"name":"耗材甲","keywords":[" 特别耗材 ","EXAMPLE"]}]');
+    expect(legacy[0]).toEqual({ name: "耗材甲", keywords: ["特别耗材", "example"] });
+    expect(normalizeStockText(" ＤＭＥＭ  高糖 ")).toBe("dmem高糖");
   });
   it("配置为空、重复、类型错误或坏 JSON 时按配置错误处理", () => {
     for (const raw of ["[]", "broken", '["吸头","吸头"]', '[{"name":""}]', '[{"name":"甲","keywords":"x"}]', '[{"name":"甲","keywords":[""]}]']) {
       expect(() => stockCategories(raw)).toThrow(MaterialError);
     }
   });
-  it("中英文关键词都能把高频品归到对应子类", () => {
-    const cases: [string, string][] = [
-      ["200ul 滤芯吸头", "塑料耗材/吸头"], ["10ul filter tips", "塑料耗材/吸头"], ["Combitips advanced 5ml", "塑料耗材/吸头"],
-      ["T25 细胞培养瓶", "塑料耗材/培养板皿"], ["6 孔板", "塑料耗材/培养板皿"], ["24 well plate", "塑料耗材/培养板皿"],
-      ["96孔半裙边PCR板", "塑料耗材/PCR板连管封膜"], ["透明8联PCR管 平盖", "塑料耗材/PCR板连管封膜"], ["封膜，普通型，适用于96孔板", "塑料耗材/PCR板连管封膜"],
-      ["10mL 移液管", "塑料耗材/移液管"], ["1.5mL EP管", "塑料耗材/离心管冻存管"], ["2ml Cryovial", "塑料耗材/离心管冻存管"],
-      ["MP 裂解介质管", "塑料耗材/研磨管电转耗材"], ["Nucleocuvette Strip", "塑料耗材/研磨管电转耗材"],
-      ["70μm 细胞筛 cell strainer", "塑料耗材/滤器"], ["血清瓶 500ml", "塑料耗材/瓶槽盒架"],
-      ["DMEM 高糖培养基", "生物试剂/培养基"], ["RPMI 1640 培养基、GlutaMAX™ 补充剂、HEPES", "生物试剂/培养基"], ["IMDM，GlutaMAX™ 添加剂", "生物试剂/培养基"], ["Opti-MEM I", "生物试剂/培养基"], ["MethoCult H4434", "生物试剂/培养基"],
-      ["PENICILLIN STREPTOMYCIN SOL", "生物试剂/添加物消化"], ["0.9% 生理盐水", "生物试剂/添加物消化"], ["TrypLE / Trypsin-EDTA", "生物试剂/添加物消化"],
-      ["Lipofectamine MessengerMAX", "生物试剂/转染"], ["jetPRIME 转染试剂", "生物试剂/转染"],
-      ["QuickExtract DNA Extraction Solution", "试剂盒/核酸提取纯化"], ["FastPure Gel DNA", "试剂盒/核酸提取纯化"],
-      ["DH5α 感受态细胞", "试剂盒/分子克隆PCR"], ["2× Phanta Max Master Mix", "试剂盒/分子克隆PCR"],
-      ["HiScript II One Step", "试剂盒/逆转录RNA"], ["Human IL-6 ELISA Kit", "试剂盒/检测试剂盒"], ["人 alpha 1 Antitrypsin ELISA试剂盒", "试剂盒/检测试剂盒"],
-      ["24孔 TC 泡壳装", "塑料耗材/培养板皿"], ["LONZA 电转 96孔套装", "塑料耗材/研磨管电转耗材"], ["30kd 超滤管", "塑料耗材/滤器"], ["75%乙醇 5L", "普通用品/纸品清洁"], ["GelRed 核酸染料", "试剂盒/核酸染料"],
-      ["丁腈手套 M", "普通用品/手套"], ["一次性鞋套", "普通用品/口罩帽鞋套"], ["擦手纸", "普通用品/纸品清洁"], ["低温标签", "普通用品/标签打印"],
-    ];
-    for (const [text, category] of cases) expect([text, classifyConsumable(text, builtin)]).toEqual([text, category]);
-    expect(normalizeStockText(" ＤＭＥＭ  高糖 ")).toBe("dmem高糖");
-  });
-  it("一次性长尾（抗体、原代细胞、耳标、饲料、脂质原料）不归类", () => {
-    for (const text of ["兔抗人 CD3 抗体", "APC-Labeled Monoclonal Antibody", "人原代 T 细胞", "小鼠耳标", "繁殖饲料", "胆固醇", "DSPC 脂质"]) {
-      expect([text, classifyConsumable(text, builtin)]).toEqual([text, null]);
-    }
-  });
-  it("库存状态三态：数量 0 为已用完，从未核对或超过期限为需复核，其余正常", () => {
+  it("库存状态三态：数量 0 为需采购，从未核对或超过期限为需复核，其余正常", () => {
     const now = new Date("2026-10-20T00:00:00Z").getTime();
     const old = new Date(now - (STOCK_STALE_DAYS + 1) * 86400000).toISOString();
     expect(stockStatus({ quantity: 0, last_checked_at: null }, now)).toBe("stale");
@@ -105,15 +77,16 @@ describe("库存条目与核对台账", () => {
     const item = await create();
     expect((await db.query("SELECT item_name FROM material_items WHERE request_no='EXAMPLE-LEGACY'")).rows).toHaveLength(1);
     expect(item).toMatchObject({ category: "塑料耗材/吸头", quantity: 10, status: "ok", revision: 0, checked_by_name: "示例管理员" });
+    expect(item.baseline_at).toBe(item.last_checked_at);
     expect(item).not.toHaveProperty("safety_stock");
     const checks = await listChecks(query, item.id);
     expect(checks).toHaveLength(1);
     expect(checks[0]).toMatchObject({ before_qty: 0, after_qty: 10, note: "建立库存", checked_by_name: "示例管理员" });
     expect((await db.query("SELECT action FROM audit_logs")).rows).toEqual([{ action: "material_stock.create" }]);
   });
-  it("不填初始数量时条目标为需复核（不当作已用完），不生成核对记录", async () => {
+  it("不填初始数量时条目标为需复核（不当作需采购），不生成核对记录，也没有基线", async () => {
     const item = await create({ quantity: undefined });
-    expect(item).toMatchObject({ status: "stale", last_checked_at: null, quantity: 0 });
+    expect(item).toMatchObject({ status: "stale", last_checked_at: null, quantity: 0, baseline_at: null });
     expect(await listChecks(query, item.id)).toHaveLength(0);
   });
   it("同名同品牌同规格拒绝重复；非法类别、空名称和负数被拒绝", async () => {
@@ -130,7 +103,7 @@ describe("库存条目与核对台账", () => {
     const item = await create();
     const checked = await transaction((c) => checkStock(c, item.id, { quantity: 3, note: "用掉 7 盒", expected_revision: item.revision }, member));
     expect(checked).toMatchObject({ quantity: 3, status: "ok", revision: 1 });
-    expect((await listChecks(query, item.id)).map((r) => [r.before_qty, r.after_qty, r.note])).toEqual([[10, 3, "用掉 7 盒"], [0, 10, "建立库存"]]);
+    expect((await listChecks(query, item.id)).map((r) => [r.before_qty, r.after_qty, r.note, r.kind])).toEqual([[10, 3, "用掉 7 盒", "check"], [0, 10, "建立库存", "check"]]);
     await expect(transaction((c) => checkStock(c, item.id, { quantity: 1, expected_revision: item.revision }, member)))
       .rejects.toMatchObject({ status: 409 });
     const [row] = (await db.query<{ quantity: string }>("SELECT quantity FROM consumable_stock WHERE id=$1", [item.id])).rows;
@@ -166,25 +139,27 @@ describe("库存条目与核对台账", () => {
 });
 
 describe("分类汇总与筛选", () => {
-  it("按大类汇总已用完和需复核，标签卡按大类前缀过滤，也可按完整子类过滤，并保留空大类", async () => {
+  it("按大类汇总需采购和需复核，标签卡按大类前缀过滤，也可按完整子类过滤，并保留空大类", async () => {
     const tip = await create({ item_name: "示例吸头甲", quantity: 1 });
     await create({ item_name: "示例吸头乙", quantity: 0 });
-    await create({ item_name: "示例培养板", category: "塑料耗材/培养板皿", spec_model: "PLATE", quantity: undefined });
-    await create({ item_name: "示例培养基", category: "生物试剂/培养基", spec_model: "MEDIUM", quantity: 4 });
+    await create({ item_name: "示例培养板", category: "细胞耗材/细胞培养板", spec_model: "PLATE", quantity: undefined });
+    await create({ item_name: "示例培养基", category: "培养基/基础培养基", spec_model: "MEDIUM", quantity: 4 });
     await db.query("UPDATE consumable_stock SET last_checked_at = now() - interval '40 days' WHERE id = $1", [tip.id]);
     const data = await listStock(query, new URLSearchParams(), builtin);
     expect(data.summary).toMatchObject({ item_count: 4, out_count: 1, stale_count: 2 });
-    expect(data.groups.map((g) => g.name)).toEqual(["普通用品", "塑料耗材", "生物试剂", "试剂盒", "其他"]);
-    expect(data.groups.find((g) => g.name === "塑料耗材")).toMatchObject({ item_count: 3, out_count: 1, stale_count: 2 });
-    expect(data.groups.find((g) => g.name === "试剂盒")).toMatchObject({ item_count: 0 });
+    expect(data.groups.map((g) => g.name)).toEqual(["细胞耗材", "塑料耗材", "通用耗材", "培养基", "常用试剂", "其他"]);
+    expect(data.groups.find((g) => g.name === "塑料耗材")).toMatchObject({ item_count: 2, out_count: 1, stale_count: 1 });
+    expect(data.groups.find((g) => g.name === "常用试剂")).toMatchObject({ item_count: 0 });
+    expect(data.review).toEqual({ pending: 0, inbound: 0 });
     expect(data.categories.find((c) => c.name === "塑料耗材/吸头")).toMatchObject({ item_count: 2, out_count: 1, stale_count: 1 });
     expect(data.items.every((i) => !("safety_stock" in i))).toBe(true);
     const names = async (sp: string) => (await listStock(query, new URLSearchParams(sp), builtin)).items.map((i) => i.item_name);
     expect(await names("status=out")).toEqual(["示例吸头乙"]);
-    expect(await names("status=stale")).toEqual(["示例吸头甲", "示例培养板"]);
+    // 按模板类别顺序：细胞耗材排在塑料耗材前。
+    expect(await names("status=stale")).toEqual(["示例培养板", "示例吸头甲"]);
     expect(await names("status=ok")).toEqual(["示例培养基"]);
-    expect(await names("category=塑料耗材")).toHaveLength(3);
-    expect(await names("category=塑料耗材/培养板皿")).toEqual(["示例培养板"]);
+    expect(await names("category=塑料耗材")).toHaveLength(2);
+    expect(await names("category=细胞耗材/细胞培养板")).toEqual(["示例培养板"]);
     expect((await listStock(query, new URLSearchParams("category=塑料耗材"), builtin)).summary.item_count).toBe(4);
     expect(await names("q=培养板")).toHaveLength(1);
     expect(await names("q=不存在")).toHaveLength(0);
@@ -207,82 +182,127 @@ const purchase = (changes: Record<string, unknown> = {}) => db.query(
 );
 let seq = 0;
 const buy = (changes: Record<string, unknown> = {}) => { seq += 1; return purchase({ request_no: `EXAMPLE-REQ-${seq}`, material_code: `EXAMPLE-M-${seq}`, ...changes }); };
-const NOW = new Date("2026-10-20T00:00:00Z").getTime();
 
-describe("参考消耗/月与最近采购", () => {
-  it("按名称+品牌+规格归一后从采购记录带出，别名和脏写法也能关联，无历史为空且不报错", async () => {
-    await create({ item_name: "24孔板", brand: "Thermo Fisher", spec_model: "EXAMPLE-24W", unit: "箱" });
-    await create({ item_name: "示例无采购耗材", spec_model: "EXAMPLE-NONE" });
-    await create({ item_name: "示例单笔耗材", spec_model: "EXAMPLE-ONE" });
-    // 同一品的三种写法：品牌别名、同义词、「货号:xx 名称:xx」。
-    await buy({ item_name: "24孔细胞培养板", brand: "Invitrogen", spec_model: "EXAMPLE-24W", unit: "箱", requested_on: "2026-01-10", quantity: 4 });
-    await buy({ item_name: "24 well plate", brand: "ABI", spec_model: "EXAMPLE-24W", unit: "箱", requested_on: "2026-03-05", quantity: 3, purchased_qty: 2 });
-    await buy({ item_name: "货号:EXAMPLE-24W 名称:24孔板", brand: "thermo fisher", spec_model: "EXAMPLE-24W", unit: "箱", requested_on: "2026-06-20", quantity: 6 });
-    // 不同单位、停用、非展示部门都不计入。
-    await buy({ item_name: "24孔板", brand: "Thermo Fisher", spec_model: "EXAMPLE-24W", unit: "个", requested_on: "2026-05-01", quantity: 100 });
-    await buy({ item_name: "24孔板", brand: "Thermo Fisher", spec_model: "EXAMPLE-24W", unit: "箱", requested_on: "2026-07-01", quantity: 50, status: "停用" });
-    await buy({ item_name: "24孔板", brand: "Thermo Fisher", spec_model: "EXAMPLE-24W", unit: "箱", requested_on: "2026-08-01", quantity: 50, department: "示例其他部门" });
-    await buy({ item_name: "示例单笔耗材", spec_model: "EXAMPLE-ONE", requested_on: "2026-02-01", quantity: 9 });
-    const items = (await listStock(query, new URLSearchParams(), builtin, ["示例部门甲"], NOW)).items;
-    const plate = items.find((i) => i.item_name === "24孔板");
-    // (4 + 2 + 6) 箱 ÷ 2026-01 至 2026-06 共 6 个月 = 2；最近采购取 2026-06-20 那笔。
-    expect(plate).toMatchObject({ monthly_usage: 2, last_purchase: { on: "2026-06-20", quantity: 6, unit: "箱" } });
-    expect(items.find((i) => i.item_name === "示例无采购耗材")).toMatchObject({ monthly_usage: null, last_purchase: null });
-    // 只有 1 笔采购时无法估算消耗，只带出最近采购。
-    expect(items.find((i) => i.item_name === "示例单笔耗材")).toMatchObject({ monthly_usage: null, last_purchase: { on: "2026-02-01", quantity: 9, unit: "盒" } });
-    // 未配置展示部门时两列为空。
-    expect((await listStock(query, new URLSearchParams(), builtin)).items.every((i) => i.monthly_usage === null && i.last_purchase === null)).toBe(true);
-  });
-});
+const DEPT = ["示例部门甲"];
+const slotId = async (key: string) => (await db.query<{ id: number }>("SELECT id FROM consumable_stock WHERE slot_key=$1", [key])).rows[0].id;
+const linkState = async () => (await db.query<{ item_name: string; state: string; confidence: string; slot_key: string | null }>(
+  `SELECT m.item_name, l.state, l.confidence, s.slot_key FROM consumable_stock_links l
+   JOIN material_items m ON m.id = l.material_id LEFT JOIN consumable_stock s ON s.id = l.stock_id ORDER BY m.id`
+)).rows.map((r) => [r.item_name, r.state, r.confidence, r.slot_key]);
+const decide = (materialId: number, input: Record<string, unknown>) => transaction((c) => decideLink(c, materialId, input, admin));
+const match = () => transaction((c) => matchPurchases(c, DEPT, admin));
 
-describe("从采购记录生成候选", () => {
-  it("只取展示部门启用记录中近 12 个月复购（≥2 笔）的品，生成需复核条目；重复执行不新增", async () => {
-    await buy({ item_name: "200ul 吸头", requested_on: "2026-09-01" });
-    await buy({ item_name: "200ul 吸头", requested_on: "2026-05-01" });
-    await buy({ item_name: "DMEM 培养基", brand: "示例品牌乙", requested_on: "2026-08-01" });
-    await buy({ item_name: "DMEM 培养基", brand: "示例品牌乙", requested_on: "2025-12-01" });
-    await buy({ item_name: "移液管", department: "示例其他部门" });
-    await buy({ item_name: "移液管", department: "示例其他部门" });
-    await buy({ item_name: "停用吸头", status: "停用" });
-    await buy({ item_name: "停用吸头", status: "停用" });
-    await buy({ item_name: "不匹配的瓶子" });
-    await buy({ item_name: "不匹配的瓶子" });
-    // 一次性采购与 12 个月前的复购不进候选池。
-    await buy({ item_name: "单次 ELISA 试剂盒" });
-    await buy({ item_name: "旧 T25 培养瓶", requested_on: "2023-07-01" });
-    await buy({ item_name: "旧 T25 培养瓶", requested_on: "2023-09-01" });
-    const first = await transaction((c) => syncStockCandidates(c, ["示例部门甲"], builtin, admin, undefined, NOW));
-    expect(first).toMatchObject({ scanned: 5, candidates: 2, created: 2, skipped: 0 });
-    const rows = (await db.query<{ category: string; item_name: string; quantity: string; note: string; last_checked_at: string | null }>(
-      "SELECT category, item_name, quantity, note, last_checked_at FROM consumable_stock ORDER BY item_name"
-    )).rows;
-    expect(rows.map((r) => [r.category, r.item_name])).toEqual([["塑料耗材/吸头", "200ul 吸头"], ["生物试剂/培养基", "DMEM 培养基"]]);
-    expect(rows.every((r) => Number(r.quantity) === 0 && r.last_checked_at === null && r.note.includes("待首次核对"))).toBe(true);
-    expect(await transaction((c) => syncStockCandidates(c, ["示例部门甲"], builtin, admin, undefined, NOW))).toMatchObject({ candidates: 2, created: 0, skipped: 2 });
-    await expect(transaction((c) => syncStockCandidates(c, [], builtin, admin))).rejects.toThrow("展示部门");
+describe("槽位模板与采购匹配", () => {
+  it("建立模板只补缺失槽位：数量 0、待核对；重复执行不新增，改过名称的模板槽位不被覆盖", async () => {
+    const first = await transaction((c) => initSlotTemplates(c, builtin, admin));
+    expect(first).toEqual({ templates: SLOT_TEMPLATES.length, created: SLOT_TEMPLATES.length, skipped: 0 });
+    await db.query("UPDATE consumable_stock SET item_name='示例改名' WHERE slot_key='plate-48'");
+    expect(await transaction((c) => initSlotTemplates(c, builtin, admin))).toMatchObject({ created: 0, skipped: SLOT_TEMPLATES.length });
+    const data = await listStock(query, new URLSearchParams("category=塑料耗材/吸头"), builtin);
+    expect(data.items.map((i) => i.item_name)).toEqual(["10µL 吸头", "10µL 滤芯吸头", "200µL 吸头", "200µL 滤芯吸头", "1000/1250µL 吸头", "1000/1250µL 滤芯吸头"]);
+    expect(data.items.every((i) => i.status === "stale" && i.unit === "箱" && i.skus.length === 0)).toBe(true);
+    expect((await db.query("SELECT item_name FROM consumable_stock WHERE slot_key='plate-48'")).rows).toEqual([{ item_name: "示例改名" }]);
+    // 类别配置里没有的模板不建。
+    await db.exec("TRUNCATE consumable_stock RESTART IDENTITY CASCADE");
+    expect(await transaction((c) => initSlotTemplates(c, stockCategories('["塑料耗材/吸头"]'), admin))).toMatchObject({ templates: 6, created: 6 });
   });
-  it("品牌别名、同义词、脏写法和 200T/200 tests 规格先归一，拆开的行合并成一个候选并以标准写法入库", async () => {
-    await buy({ item_name: "示例 ELISA Kit", brand: "Vazyme", spec_model: "EXAMPLE-EK 200 tests", requested_on: "2026-09-01" });
-    await buy({ item_name: "货号:EXAMPLE-EK 名称:示例 ELISA Kit", brand: "诺唯赞", spec_model: "EXAMPLE-EK 200Test", requested_on: "2026-03-01" });
-    await buy({ item_name: "示例 ELISA Kit", brand: "南京诺唯赞", spec_model: "EXAMPLE-EK 200T", requested_on: "2026-01-01" });
-    await buy({ item_name: "示例8连管", brand: "Titan/泰坦", requested_on: "2026-09-15" });
-    await buy({ item_name: "示例8联排管", brand: "探索平台", requested_on: "2026-04-15" });
-    const result = await transaction((c) => syncStockCandidates(c, ["示例部门甲"], builtin, admin, undefined, NOW));
-    expect(result).toMatchObject({ scanned: 5, candidates: 2, created: 2 });
-    const rows = (await db.query<{ category: string; item_name: string; brand: string; spec_model: string }>(
-      "SELECT category, item_name, brand, spec_model FROM consumable_stock ORDER BY id"
-    )).rows;
-    expect(rows).toEqual([
-      { category: "塑料耗材/PCR板连管封膜", item_name: "示例8连管", brand: "泰坦", spec_model: "EXAMPLE-SPEC" },
-      { category: "试剂盒/检测试剂盒", item_name: "示例 ELISA Kit", brand: "诺唯赞", spec_model: "EXAMPLE-EK 200T" },
+  it("匹配只处理展示部门启用记录，给出建议和把握；长尾不建记录；重复匹配不重复处理", async () => {
+    await expect(match()).rejects.toThrow("建立槽位模板");
+    await transaction((c) => initSlotTemplates(c, builtin, admin));
+    await buy({ item_name: "200ul吸头滤芯低吸附盒装灭菌", brand: "示例品牌", spec_model: "EXAMPLE-TF-200", unit: "箱", minor_category: "耗材" });
+    await buy({ item_name: "24孔细胞培养板，平底，TC", spec_model: "EXAMPLE-24", unit: "箱", minor_category: "耗材" });
+    await buy({ item_name: "人 alpha 1 Antitrypsin ELISA试剂盒", minor_category: "试剂盒" });
+    await buy({ item_name: "示例 Trypsin 0.25% EDTA", minor_category: "生物试剂" });
+    await buy({ item_name: "DMEM 培养基", minor_category: "耗材" });
+    await buy({ item_name: "6孔板 未TC", minor_category: "耗材" });
+    await buy({ item_name: "示例抗体", minor_category: "生物试剂" });
+    await buy({ item_name: "200ul吸头", department: "示例其他部门" });
+    await buy({ item_name: "200ul吸头", status: "停用" });
+    const result = await match();
+    expect(result).toEqual({ scanned: 7, suggested: 4, known: 0, excluded: 0, unmatched: 3 });
+    expect(await linkState()).toEqual([
+      ["200ul吸头滤芯低吸附盒装灭菌", "pending", "high", "tip-200f"],
+      ["24孔细胞培养板，平底，TC", "pending", "high", "plate-24"],
+      ["示例 Trypsin 0.25% EDTA", "pending", "high", "trypsin"],
+      ["DMEM 培养基", "pending", "mid", "dmem"],
     ]);
+    // 已建记录的不再处理；没命中的长尾每次重扫（以后新增槽位或规则时还能归入）。
+    expect(await match()).toEqual({ scanned: 3, suggested: 0, known: 0, excluded: 0, unmatched: 3 });
+    await expect(transaction((c) => matchPurchases(c, [], admin))).rejects.toThrow("展示部门");
+    const links = await listLinks(query, new URLSearchParams());
+    expect(links.counts).toEqual({ pending: 4, inbound: 0 });
+    expect(links.items[0]).toMatchObject({ slot_label: "细胞耗材/细胞培养板 · 24孔板 TC", slot_unit: "箱", quantity: 1 });
+    await expect(listLinks(query, new URLSearchParams("view=x"))).rejects.toThrow("未知的核对视图");
   });
-  it("已有同一归一键的条目（即使写法不同）不再新建", async () => {
-    await create({ item_name: "示例吸头", brand: "Thermo Fisher", spec_model: "EXAMPLE-TIP" });
-    await buy({ item_name: "示例吸头", brand: "Invitrogen", spec_model: "EXAMPLE-TIP" });
-    await buy({ item_name: "示例 吸头", brand: "ABI", spec_model: "EXAMPLE-TIP" });
-    const result = await transaction((c) => syncStockCandidates(c, ["示例部门甲"], builtin, admin, undefined, NOW));
-    expect(result).toMatchObject({ candidates: 1, created: 0, skipped: 1 });
-    expect((await db.query("SELECT 1 FROM consumable_stock")).rows).toHaveLength(1);
+  it("确认会记住货号并带走同货号的待确认记录；以后同货号采购直接归入，排除过的直接排除", async () => {
+    await transaction((c) => initSlotTemplates(c, builtin, admin));
+    await buy({ item_name: "示例 10ul 吸头", brand: "示例品牌", spec_model: "EXAMPLE-T10", requested_on: "2026-01-01" });
+    await buy({ item_name: "示例 10ul 吸头", brand: "示例品牌", spec_model: "EXAMPLE-T10", requested_on: "2026-03-01" });
+    await buy({ item_name: "示例 Phanta Ultra", spec_model: "EXAMPLE-P528" });
+    await match();
+    // 第一条改归到滤芯吸头槽位，同货号的另一条一起归入。
+    expect(await decide(1, { action: "confirm", stock_id: await slotId("tip-10f") })).toEqual({ updated: 2 });
+    expect(await decide(3, { action: "exclude" })).toEqual({ updated: 1 });
+    expect(await linkState()).toEqual([
+      ["示例 10ul 吸头", "confirmed", "high", "tip-10f"], ["示例 10ul 吸头", "confirmed", "high", "tip-10f"], ["示例 Phanta Ultra", "excluded", "low", null],
+    ]);
+    await buy({ item_name: "示例  10ul 吸头", brand: "示例品牌", spec_model: "EXAMPLE-T10", requested_on: "2026-09-01" });
+    await buy({ item_name: "示例 Phanta Ultra", spec_model: "EXAMPLE-P528", requested_on: "2026-09-02" });
+    expect(await match()).toMatchObject({ scanned: 2, known: 1, excluded: 1, suggested: 0 });
+    const [slot] = (await listStock(query, new URLSearchParams("q=10µL 滤芯"), builtin)).items;
+    expect(slot.skus).toEqual([{ item_name: "示例 10ul 吸头", brand: "示例品牌", spec_model: "EXAMPLE-T10" }]);
+    expect(slot.last_purchase).toEqual({ on: "2026-09-01", quantity: 1, unit: "盒" });
+    // 尚未核对（无基线）时没有待入库，也不能入库。
+    expect(slot.pending_inbound).toBe(0);
+    await expect(decide(4, { action: "stock" })).rejects.toThrow("基线之后");
+    await expect(decide(1, { action: "confirm", stock_id: 9999 })).rejects.toMatchObject({ status: 404 });
+    await expect(decide(1, { action: "unknown" })).rejects.toThrow("未知的处理动作");
+    await expect(decide(999, { action: "exclude" })).rejects.toMatchObject({ status: 404 });
+  });
+  it("基线之后的采购才进待入库：入库加数并记入库历史，不加数只改状态；基线日及以前的采购视为已计入", async () => {
+    await transaction((c) => initSlotTemplates(c, builtin, admin));
+    const tip = await slotId("tip-200");
+    await buy({ item_name: "示例 200ul 吸头", spec_model: "EXAMPLE-T200", unit: "箱", requested_on: "2026-01-01", quantity: 2 });
+    await match();
+    await decide(1, { action: "confirm" });
+    await db.query("UPDATE consumable_stock SET quantity=5, last_checked_at=now(), baseline_at='2026-06-01T04:00:00Z' WHERE id=$1", [tip]);
+    await buy({ item_name: "示例 200ul 吸头", spec_model: "EXAMPLE-T200", unit: "箱", requested_on: "2026-06-01", quantity: 9 });
+    await buy({ item_name: "示例 200ul 吸头", spec_model: "EXAMPLE-T200", unit: "箱", requested_on: "2026-07-01", quantity: 3 });
+    await buy({ item_name: "示例 200ul 吸头", spec_model: "EXAMPLE-T200", unit: "箱", requested_on: "2026-08-01", quantity: 4 });
+    await match();
+    const inbound = await listLinks(query, new URLSearchParams("view=inbound"));
+    expect(inbound.items.map((i) => [i.requested_on, i.quantity])).toEqual([["2026-08-01", 4], ["2026-07-01", 3]]);
+    expect((await listStock(query, new URLSearchParams("q=200µL 吸头"), builtin)).items[0].pending_inbound).toBe(2);
+    const stocked = await decide(3, { action: "stock", quantity: 2 });
+    expect(stocked.stock).toMatchObject({ quantity: 7, revision: 1 });
+    await expect(decide(4, { action: "stock", quantity: 0 })).rejects.toThrow("大于 0");
+    await decide(4, { action: "skip" });
+    await expect(decide(3, { action: "stock" })).rejects.toThrow("基线之后");
+    await expect(decide(3, { action: "exclude" })).rejects.toThrow("已入库");
+    const history = await listChecks(query, tip);
+    expect(history[0]).toMatchObject({ before_qty: 5, after_qty: 7, kind: "inbound" });
+    expect(history[0].note).toContain("入库：EXAMPLE-REQ-");
+    const done = await listLinks(query, new URLSearchParams("view=done"));
+    expect(done.items.map((i) => [i.state, i.applied_qty, i.decided_by_name])).toEqual([["skipped", null, "示例管理员"], ["stocked", 2, "示例管理员"]]);
+    expect(done.counts).toEqual({ pending: 0, inbound: 0 });
+  });
+  it("消耗/月：盘点满 28 天按盘点差计算（入库不算消耗），否则按已归入的同单位采购估算", async () => {
+    await transaction((c) => initSlotTemplates(c, builtin, admin));
+    const tube = await slotId("tube-1.5");
+    await buy({ item_name: "示例 1.5mL 离心管", spec_model: "EXAMPLE-T15", unit: "箱", requested_on: "2026-01-10", quantity: 4 });
+    await buy({ item_name: "示例 1.5mL 离心管", spec_model: "EXAMPLE-T15", unit: "箱", requested_on: "2026-06-20", quantity: 8 });
+    await buy({ item_name: "示例 1.5mL 离心管", spec_model: "EXAMPLE-T15", unit: "盒", requested_on: "2026-07-20", quantity: 50 });
+    await match();
+    await decide(1, { action: "confirm" });
+    const usage = async () => (await listStock(query, new URLSearchParams("q=1.5mL"), builtin)).items[0];
+    // (4 + 8) 箱 ÷ 2026-01 至 2026-06 共 6 个月 = 2；「盒」那笔不同单位不计入。
+    expect(await usage()).toMatchObject({ monthly_usage: 2, usage_basis: "purchases", last_purchase: { on: "2026-07-20", quantity: 50, unit: "盒" } });
+    await db.query("UPDATE consumable_stock SET quantity=10, last_checked_at='2026-08-01', baseline_at='2026-08-01' WHERE id=$1", [tube]);
+    await db.query(
+      `INSERT INTO consumable_stock_checks(stock_id, before_qty, after_qty, checked_at, kind) VALUES
+       ($1,0,10,'2026-08-01','check'), ($1,10,16,'2026-08-20','inbound'), ($1,16,12,'2026-09-01','check'), ($1,12,9,'2026-09-30','check')`, [tube]
+    );
+    // 基线后盘点共减少 4 + 3 = 7 箱，2026-08-01 至 09-30 共 60 天 ≈ 1.97 个月 → 3.55 箱/月；入库的 +6 不算消耗。
+    expect(await usage()).toMatchObject({ monthly_usage: 3.55, usage_basis: "checks" });
   });
 });

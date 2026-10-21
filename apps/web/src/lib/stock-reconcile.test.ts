@@ -20,7 +20,7 @@ const query: MaterialQuery = async <T,>(sql: string, params?: unknown[]) => (awa
 const transaction = <T>(fn: (c: PoolClient) => Promise<T>) => db.transaction((c) => fn(c as unknown as PoolClient));
 let materialSeq = 0;
 const stock = (changes: Record<string, unknown> = {}) => transaction((c) => createStockItem(c, {
-  category: "塑料耗材/培养板皿", item_name: "24 孔板", brand: "示例品牌", spec_model: "EXAMPLE-24W", unit: "箱",
+  category: "细胞耗材/细胞培养板", item_name: "24 孔板", brand: "示例品牌", spec_model: "EXAMPLE-24W", unit: "箱",
   quantity: 2, note: "细胞房第二层", ...changes,
 }, admin, categories));
 const material = async (changes: Record<string, unknown> = {}) => {
@@ -42,6 +42,7 @@ beforeAll(async () => {
   await db.exec(await readFile(new URL("../../../../db/migrations/009_material_usage.sql", import.meta.url), "utf8"));
   await db.exec(await readFile(new URL("../../../../db/migrations/011_consumable_stock.sql", import.meta.url), "utf8"));
   await db.exec(await readFile(new URL("../../../../db/migrations/012_stock_reconcile.sql", import.meta.url), "utf8"));
+  await db.exec(await readFile(new URL("../../../../db/migrations/013_consumable_slots.sql", import.meta.url), "utf8"));
   await db.exec("INSERT INTO users(id,username,display_name,password_hash,role) VALUES (1,'example-admin','示例管理员','example-hash','admin'),(2,'example-member','示例成员','example-hash','member'),(3,'example-member-2','示例成员乙','example-hash','member')");
 }, 30000);
 beforeEach(async () => {
@@ -93,7 +94,7 @@ describe("提交库存校对请求", () => {
     const materialId = await material();
     const request = await submit({ material_ids: [materialId] });
     expect(request).toMatchObject({
-      stock_id: item.id, stock_label: "塑料耗材/培养板皿 · 24 孔板 · 示例品牌 · EXAMPLE-24W",
+      stock_id: item.id, stock_label: "细胞耗材/细胞培养板 · 24 孔板 · 示例品牌 · EXAMPLE-24W",
       stock_before: 2, stock_revision: 0, proposed_quantity: 0, status: "pending",
       requested_by_name: "示例成员", materials: [{ id: materialId }],
     });

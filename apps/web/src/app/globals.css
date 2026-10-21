@@ -197,3 +197,7 @@ button.rack-card.empty { cursor: pointer; }
 .stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat-tile { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); }
 .stat-tile strong { font-size: 26px; font-variant-numeric: tabular-nums; }
+/* 常用耗材槽位：已挂货号列表、待入库提示、核对工作台分组行 */
+.stock-skus { margin: 4px 0 0; padding-left: 16px; font-size: 12px; color: var(--muted); }
+.stock-inbound { display: inline-block; margin-top: 2px; font-size: 12px; color: var(--primary); }
+tr.stock-group td { background: #f5f5f4; font-weight: 600; }
