@@ -1,13 +1,15 @@
 # 常用耗材两级分类升级：部署与验收清单（2026-10-20）
 
-对应分支 `task-63`（基于 `main` `651abac`），改动未提交。代码侧已完成：全量 103 条测试通过、`npm run build` 通过、UI 检查 12 项通过。
+对应分支 `task-63`，提交 `859176b`，已合并进 `main` 为 `18cd3d7`。代码侧：全量 103 条测试通过、`npm run build` 通过、UI 检查 12 项通过。
+
+**执行状态（2026-10-21 09:42）**：0～2 节完成，3 节第 1～4 项已线上验证；第 5～6 项因库存 0 条未做，4～5 节待授权。
 
 ## 0. 合并前（开发机）
 
-- [ ] 确认 `git status` 只有本轮改动（16 改 + 3 新增），无其他脏文件
-- [ ] `cd apps/web && npx vitest run` → 13 文件 103 条通过
-- [ ] `npm run build` → 退出码 0
-- [ ] 合并到 `main`（需授权）：`git checkout main && git merge --no-ff task-63`
+- [x] 确认 `git status` 只有本轮改动（16 改 + 3 新增），无其他脏文件
+- [x] `cd apps/web && npx vitest run` → 13 文件 103 条通过
+- [x] `npm run build` → 退出码 0
+- [x] 合并到 `main`：`git merge --no-ff task-63` → `18cd3d7`（未推送）
 
 ## 1. 部署前：生产配置检查（必须）
 
@@ -17,7 +19,7 @@
 Select-String -Path C:\lab-workspace\config\lab.env -Pattern 'MATERIAL_STOCK_CATEGORIES_JSON'
 ```
 
-- 无输出 → 不用改，使用内置四大类 + 其他。
+- 无输出 → 不用改，使用内置四大类 + 其他。**2026-10-21 核对：无输出。**
 - 有输出 → 删除该行，或换成新格式（见 `docs/consumable-stock.md`「类别配置」）。
   **不处理的话标签卡仍是旧五类，代码再新也没用。**
 
@@ -28,22 +30,23 @@ Select-String -Path C:\lab-workspace\config\lab.env -Pattern 'MATERIAL_STOCK_CAT
 bash infra/windows/build-bundle.sh
 ```
 
-- [ ] 把 `dist/bundle/` 拷到 `C:\lab-workspace\incoming\`（覆盖 `app.zip` 与 `deploy/`）
-- [ ] 管理员执行 `powershell -ExecutionPolicy Bypass -File C:\lab-workspace\incoming\deploy\install.ps1`
-      （自动停旧进程、替换 `app\`、执行 011/012 迁移、重启）
-- [ ] 健康检查 `http://<地址>:3000/api/v1/health` → `{"status":"ok","db":true,"r_engine":true}`
+- [x] 把 `dist/bundle/` 拷到 `C:\lab-workspace\incoming\`（覆盖 `app.zip` 与 `deploy/`）；SHA-256 `d747b801…12eacb`
+- [x] 管理员执行 `install.ps1`（停旧进程、替换 `app\`、迁移、重启）→ 退出码 0
+- [x] 健康检查 `{"status":"ok","db":true,"r_engine":true}`；VERSION `18cd3d7`
+
+备份：`E:\lab-workspace\backups\lab_workspace_20261021_0942.dump`；回滚包 `incoming\app.prev-taxonomy-20261021_0942.zip`。
 
 迁移 011/012 只新增 `consumable_stock`、`consumable_stock_checks`、`stock_reconcile_requests`，不改既有采购记录；`safety_stock` 列保留，老数据照常读。
 
 ## 3. 部署后冒烟（管理员登录，约 5 分钟）
 
 1. 打开「常用耗材」：标签卡应是 **全部｜普通用品｜塑料耗材｜生物试剂｜试剂盒｜其他**。
-   还是旧五类 → 回到第 1 步查 `lab.env`。
-2. 点「塑料耗材」：只剩塑料行；类别列下方有子类小标签（如「吸头」）。
-3. 状态列只有 已用完／需复核／正常；页面无「安全库存」字样；最后两列是「参考消耗/月」「最近采购」。
-4. 点「新增耗材」：类别下拉按四个大类分组、只有子类选项；没有安全库存输入框。保存一条不填数量 → 状态应为「需复核」，不是「已用完」。
-5. 点「从采购记录生成候选」：生产库存表当前 0 行，生成前页面空是正常的；返回 `created` 应接近 28（以生产数据为准）。
-6. 抽一行看「最近采购」和「参考消耗/月」是否有值；没有采购历史的行显示 `—` 是正确的。
+   还是旧五类 → 回到第 1 步查 `lab.env`。✅ 已线上验证
+2. 点「塑料耗材」：只剩塑料行；类别列下方有子类小标签（如「吸头」）。← 库存 0 条，待有数据后补验
+3. 状态列只有 已用完／需复核／正常；页面无「安全库存」字样；最后两列是「参考消耗/月」「最近采购」。✅ 已线上验证
+4. 点「新增耗材」：类别下拉按四个大类分组、只有子类选项；没有安全库存输入框。保存一条不填数量 → 状态应为「需复核」，不是「已用完」。✅ 组件本地已验证；线上留待首次新增时确认
+5. 点「从采购记录生成候选」：生产库存表当前 0 行，生成前页面空是正常的；返回 `created` 应接近 28（以生产数据为准）。← 未执行
+6. 抽一行看「最近采购」和「参考消耗/月」是否有值；没有采购历史的行显示 `—` 是正确的。← 未执行
 
 ## 4. 41 条种子入库（需授权选择方式）
 

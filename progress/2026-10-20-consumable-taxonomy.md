@@ -53,3 +53,15 @@
 - 新增部署与验收清单 `progress/2026-10-20-consumable-deploy-checklist.md`。
 - 部署清单里注明：导入 41 条时 `quantity` 必须留空，不能把 CSV 的「入库数量 0」写成 0，否则全部误报「已用完」。
 - 状态仍为待验收：业务验收需合并、部署后在线上完成；合并与部署待授权。
+
+### 生产部署（2026-10-21，已执行）
+
+- Git：`task-63` 提交 `859176b`，合并进 main 为 `18cd3d7`（`--no-ff`）。**未推送** `origin/main`。
+- 构建：`bash infra/windows/build-bundle.sh`，`app.zip` 7,622,171 字节，SHA-256 `d747b801a7c8f9e44a8a75c9565b4d04758b8e8efcb016fb79361a021812eacb`，VERSION `18cd3d7`。
+- 部署前备份：`E:\lab-workspace\backups\lab_workspace_20261021_0942.dump`（272,336 字节）；回滚包 `C:\lab-workspace\incoming\app.prev-taxonomy-20261021_0942.zip`（7,619,205 字节，即 `01f7bb7`）与 `deploy.prev-taxonomy-20261021_0942`。
+- 配置检查：生产 `lab.env` 无 `MATERIAL_STOCK_CATEGORIES_JSON`，使用内置四大类 + 其他，无需改动。
+- 上传后远程 SHA-256 与本地一致；`install.ps1` 退出码 0，迁移提示「数据库结构已是最新」（011/012 上次部署已执行）。
+- 部署后核对：`app\VERSION=18cd3d7`；健康检查 `{"status":"ok","db":true,"r_engine":true}`；`LabWorkspace-Web`/`LabWorkspace-R` Running、`ExecutionTimeLimit=PT0S`；3000 端口监听。
+- 生产 API（mcp 账号）：`groups` = 普通用品/塑料耗材/生物试剂/试剂盒/其他，`items=0`，无 `safety_stock`，`summary` 新字段正常。
+- 浏览器实测 `http://192.168.7.5:3000/materials/stock`：6 张标签卡、11 列（含参考消耗/月、最近采购）、无「安全库存」、无 JS 报错；库存 0 条，显示「还没有库存条目」。
+- **未做**：点「从采购记录生成候选」、导入 41 条、现场盘点；这些仍需授权。任务状态未改为「完成」。
