@@ -7,7 +7,7 @@ import type { MaterialQuery } from "./materials-list";
 
 const PAGE = 50;
 const STATUS_TEXT: Record<StockItem["status"], string> = {
-  unchecked: "待核对", out: "已用完", low: "低于安全库存", ok: "正常",
+  out: "已用完", stale: "需复核", ok: "正常",
 };
 
 export interface ReconcileMaterial {
@@ -184,7 +184,7 @@ export async function searchReconcileContext(
   const pattern = `%${query}%`;
   const compact = `%${query.replace(/\s+/g, "")}%`;
 
-  const stock = await listStock(db, new URLSearchParams({ q: query }), categories, now);
+  const stock = await listStock(db, new URLSearchParams({ q: query }), categories, [], now);
   const stockItems = stock.items.slice(0, 20).map((item) => ({ ...item, status_text: STATUS_TEXT[item.status] }));
 
   const rows = await db<{

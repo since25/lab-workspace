@@ -69,7 +69,7 @@ MCP 服务不直接连 PostgreSQL，也不携带管理员权限。它用一个�
   "months": 2,
   "cutoff": "2026-08-20",
   "stock_items": [
-    { "id": 5, "item_name": "24 孔板", "quantity": 2, "unit": "箱", "status": "low", "status_text": "低于安全库存", "revision": 3 }
+    { "id": 5, "item_name": "24 孔板", "quantity": 2, "unit": "箱", "status": "ok", "status_text": "正常", "revision": 3 }
   ],
   "purchase_records": [
     { "id": 101, "item_name": "24 孔板", "request_no": "...", "requested_on": "2026-09-01", "last_received_on": null,
@@ -86,7 +86,7 @@ MCP 服务不直接连 PostgreSQL，也不携带管理员权限。它用一个�
 ```
 
 - `suggested_material_ids` 是尚未已用完、也还没有待审批「已用完申请」的采购记录；`pending_material_ids` 是已在等待审批的记录。agent 应先向用户说明两者区别。采购记录最多返回 500 条，超过时 `summary.truncated` 为 true；`departments` 是当前展示部门。
-- 库存状态：`unchecked` 待核对、`out` 已用完（数量 0）、`low` 低于安全库存、`ok` 正常；从未核对的数量视为未知，不当作 0。
+- 库存状态：`out` 已用完（已核对且数量 0）、`stale` 需复核（从未核对或超过 30 天未核对）、`ok` 正常；从未核对的数量视为未知，不当作 0。
 - 名称匹配会同时比较去掉空格后的文本，`24孔板` 能匹配 `24 孔板`。
 
 ### `submit_stock_reconciliation`
@@ -107,7 +107,7 @@ MCP 服务不直接连 PostgreSQL，也不携带管理员权限。它用一个�
 ```text
 用户：24孔板用完了
 agent：调用 search_consumable("24孔板", 2)
-       发现：常用耗材 24 孔板登记 2 箱（低于安全库存，最近核对于 …）；
+       发现：常用耗材 24 孔板登记 2 箱（最近核对于 …）；
              近 2 个月有 1 条采购记录未收货；历史采购 12 条，其中 3 条仍未标记已用完。
 agent：复述上述情况，并问：
        “是否把其中 3 条历史采购记录标记为已用完，并把常用耗材数量改为 0（用完）？”

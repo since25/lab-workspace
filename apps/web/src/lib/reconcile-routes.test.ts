@@ -102,7 +102,7 @@ describe("库存校对 API 参数与错误", () => {
     const [dbArg, spArg, categories, departments] = mocks.search.mock.calls[0];
     expect(dbArg).toBe(mocks.query);
     expect(spArg.get("months")).toBe("3");
-    expect(categories.map((c: { name: string }) => c.name)).toContain("细胞培养板");
+    expect(categories.map((c: { name: string }) => c.name)).toContain("塑料耗材/培养板皿");
     expect(departments).toEqual(["示例部门甲"]);
   });
 });
