@@ -50,9 +50,9 @@
 - `POST /materials/:id/usage`：`{action:"mark",confirmed:true}`；普通成员提交待审批申请，管理员直接标记；`restore/approve/reject` 仅 admin，超出展示部门的记录不可操作
 - `GET /admin/materials/usage-requests?page=`：仅 admin，分页查询展示部门的未批准申请
 - `POST /admin/materials/usage-requests`：仅 admin，`{ids,action:"approve"|"reject"}`，单次最多 500 条；已变化的状态跳过，任一 ID 不存在或超出范围则整批拒绝
-- `GET /materials/stock`：常用耗材库存列表，所有登录用户；`category`（配置中的类别）、`q`（名称/品牌/规格/备注）、`status=unchecked|out|low|ok|stale`；返回 `categories`（含空类别的条目数/待核对/已用完/偏低/待复核）、`items`、`summary`、`stale_days`。未核对条目 `last_checked_at=null`，不计入已用完/偏低；`status=out` 表示数量为 0（已用完）
-- `POST /materials/stock`：仅 admin，新增条目 `{category,item_name,brand?,spec_model?,unit?,quantity?,safety_stock?,note?}`；`quantity` 省略表示待核对；同名同品牌同规格重复返回 409
-- `PATCH /materials/stock/:id`：仅 admin，修改类别/名称/品牌/规格/单位/安全库存/备注；传 `quantity` 返回 400（数量须走核对）
+- `GET /materials/stock`：常用耗材库存列表，所有登录用户；`category`（大类，如 `塑料耗材`，按「大类/」前缀过滤；或配置中的完整类别「大类/子类」）、`q`（名称/品牌/规格/备注）、`status=out|stale|ok`；返回 `groups`（大类标签卡汇总，含空大类）、`categories`（每个子类汇总）、`items`、`summary`、`stale_days`。汇总字段为 `item_count/out_count/stale_count/last_checked_at`。状态三态：`out` 已核对且数量为 0，`stale` 从未核对或超过 `stale_days` 天未核对，`ok` 其余；不再返回 `safety_stock`。每个 item 附带 `monthly_usage`（参考消耗/月，数字或 null）与 `last_purchase`（`{on,quantity,unit}` 或 null），由展示部门采购记录按名称+品牌+规格归一后自动计算
+- `POST /materials/stock`：仅 admin，新增条目 `{category,item_name,brand?,spec_model?,unit?,quantity?,note?}`；`quantity` 省略表示未核对（状态 `stale`）；`safety_stock` 已停用，传入会被忽略；同名同品牌同规格重复返回 409
+- `PATCH /materials/stock/:id`：仅 admin，修改类别/名称/品牌/规格/单位/备注；传 `quantity` 返回 400（数量须走核对）；`safety_stock` 已停用，传入会被忽略
 - `DELETE /materials/stock/:id`：仅 admin，删除条目及核对历史，审计写快照
 - `POST /materials/stock/:id/check`：仅 admin，`{quantity,note?,expected_revision?}`；`revision` 不一致返回 409，成功写入核对历史并递增版本
 - `GET /materials/stock/:id/checks?limit=10`：所有登录用户，最近核对历史（最多 50 条）

@@ -74,11 +74,10 @@ td.actions { white-space: nowrap; }
 
 .flag { display: inline-block; font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--warn-bg); color: var(--warn-text); }
 .stock-status { display: inline-block; font-size: 12px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
-.stock-unchecked { background: #e7e5e4; color: var(--muted); }
 .stock-out { background: #fee2e2; color: var(--danger); }
-.stock-low { background: var(--warn-bg); color: var(--warn-text); }
+.stock-low, .stock-stale { background: var(--warn-bg); color: var(--warn-text); }
 .stock-ok { background: #ecfdf5; color: var(--primary-hover); }
-.stock-stale { font-size: 12px; color: var(--warn-text); margin-top: 2px; }
+.stock-sub { display: inline-block; font-size: 12px; padding: 0 6px; margin-top: 2px; border-radius: 4px; background: #f5f5f4; color: var(--muted); }
 .stock-alert { margin-left: 6px; font-size: 11px; color: var(--danger); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 .error { color: var(--danger); margin: 8px 0; }

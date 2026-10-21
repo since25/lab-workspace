@@ -50,15 +50,16 @@
 
 与 `material_items` 分表保存的实物库存，迁移 `011_consumable_stock.sql`。一行 `consumable_stock` 是一个可盘点的耗材条目（同一类别＋名称＋品牌＋规格），不是采购记录。
 
-`consumable_stock`：`id`, `category`（配置中的类别名）, `item_name`, `brand`, `spec_model`, `unit`, `quantity`（当前数量，`numeric(12,2)`，≥0）, `safety_stock`（安全库存，≥0）, `note`, `last_checked_at`（最近核对时间，空 = 从未核对）, `last_checked_by -> users.id`, `revision`（乐观锁版本）, `created_by`, `updated_by`, `created_at`, `updated_at`；`(category, item_name, brand, spec_model)` 唯一。
+`consumable_stock`：`id`, `category`（配置中的类别名，「大类/子类」）, `item_name`, `brand`, `spec_model`, `unit`, `quantity`（当前数量，`numeric(12,2)`，≥0）, `safety_stock`（安全库存，≥0；2026-10-20 起停用，列保留不删，界面与状态逻辑不再读取）, `note`, `last_checked_at`（最近核对时间，空 = 从未核对）, `last_checked_by -> users.id`, `revision`（乐观锁版本）, `created_by`, `updated_by`, `created_at`, `updated_at`；`(category, item_name, brand, spec_model)` 唯一。
 
 `consumable_stock_checks`：`id`, `stock_id -> consumable_stock.id`（删除级联）, `before_qty`, `after_qty`, `note`, `checked_by -> users.id`, `checked_at`。每次核对追加一条，不覆盖历史。
 
 规则：
 
 - 数量只由「核对」改变；新增时可带初始数量（同时写一条「建立库存」），不带则 `last_checked_at` 为空、页面显示「待核对」。
-- 从未核对的条目不当作 0，不计入缺货/偏低；已核对且 `quantity <= 0` 为已用完（接口状态 `out`），`safety_stock > 0` 且 `quantity <= safety_stock` 为偏低；超过 30 天未核对提示待复核；超过 30 天未核对提示待复核。
-- 类别由 `MATERIAL_STOCK_CATEGORIES_JSON` 配置，默认吸头/细胞培养板/移液管/离心管/培养基；关键词只用于从采购记录生成候选。
+- 状态三态：已核对且 `quantity <= 0` 为已用完（`out`）；从未核对或超过 30 天未核对为需复核（`stale`，从未核对的数量未知，不当作 0）；其余正常（`ok`）。
+- 类别由 `MATERIAL_STOCK_CATEGORIES_JSON` 配置，默认四大类（普通用品/塑料耗材/生物试剂/试剂盒）共 20 个子类 + 其他；关键词只用于从采购记录生成候选。
+- 品牌别名、品目同义词与规格写法在候选生成和关联采购记录前先归一（`stock-normalize.ts`），不改 `material_items` 原值。
 - 查询和核对历史所有登录用户可看；新增/编辑/删除/核对/生成候选仅 admin，与物料维护边界一致。
 - 核对使用 `revision` 乐观锁，旧版本提交返回 409；创建/修改/核对/删除/同步写 `audit_logs`，不写采购明细。
 - 详见 `consumable-stock.md`，选型依据见 `material-inventory-research.md`。

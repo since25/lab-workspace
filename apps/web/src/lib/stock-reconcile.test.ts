@@ -20,8 +20,8 @@ const query: MaterialQuery = async <T,>(sql: string, params?: unknown[]) => (awa
 const transaction = <T>(fn: (c: PoolClient) => Promise<T>) => db.transaction((c) => fn(c as unknown as PoolClient));
 let materialSeq = 0;
 const stock = (changes: Record<string, unknown> = {}) => transaction((c) => createStockItem(c, {
-  category: "细胞培养板", item_name: "24 孔板", brand: "示例品牌", spec_model: "EXAMPLE-24W", unit: "箱",
-  quantity: 2, safety_stock: 3, note: "细胞房第二层", ...changes,
+  category: "塑料耗材/培养板皿", item_name: "24 孔板", brand: "示例品牌", spec_model: "EXAMPLE-24W", unit: "箱",
+  quantity: 2, note: "细胞房第二层", ...changes,
 }, admin, categories));
 const material = async (changes: Record<string, unknown> = {}) => {
   materialSeq += 1;
@@ -60,7 +60,7 @@ describe("库存校对上下文检索", () => {
     await material({ request_no: "EXAMPLE-REQ-6", department: "示例其他部门" });
     const result = await searchReconcileContext(query, new URLSearchParams("q=24孔板&months=2"), categories, departments, now);
     expect(result.stock_items).toHaveLength(1);
-    expect(result.stock_items[0]).toMatchObject({ id: item.id, quantity: 2, status: "low", status_text: "低于安全库存" });
+    expect(result.stock_items[0]).toMatchObject({ id: item.id, quantity: 2, status: "ok", status_text: "正常" });
     const byId = new Map(result.purchase_records.map((r) => [r.id, r]));
     expect(result.purchase_records).toHaveLength(5);
     expect(byId.get(recentUnreceived)).toMatchObject({ recent: true, unreceived: true, received: false, partial: false });
@@ -93,7 +93,7 @@ describe("提交库存校对请求", () => {
     const materialId = await material();
     const request = await submit({ material_ids: [materialId] });
     expect(request).toMatchObject({
-      stock_id: item.id, stock_label: "细胞培养板 · 24 孔板 · 示例品牌 · EXAMPLE-24W",
+      stock_id: item.id, stock_label: "塑料耗材/培养板皿 · 24 孔板 · 示例品牌 · EXAMPLE-24W",
       stock_before: 2, stock_revision: 0, proposed_quantity: 0, status: "pending",
       requested_by_name: "示例成员", materials: [{ id: materialId }],
     });
