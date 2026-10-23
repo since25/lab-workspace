@@ -7,7 +7,11 @@ type SourceKey = "materials" | "freezer" | "assets";
 type Item = Record<string, string | number | boolean> & { id: number };
 type Field = { key: string; label: string };
 type Printer = { id: number; printer_key: string; name: string; enabled: boolean; is_default: boolean; ready?: boolean; reason?: string; jobs?: number; notes?: string };
-type Preview = { images: string[]; count: number; media_count?: number; fields: string[]; template?: string };
+type Preview = { images: string[]; count: number; media_count?: number; fields: string[]; template?: string; media?: Media };
+type Media = { dpi: number; width_mm: number; height_mm: number; slot_width_mm: number; slot_height_mm: number; columns: number };
+
+// 纸张尺寸兜底值：标签服务不可用或还没返回时，仍能显示 30×15 双列的标注。
+const FALLBACK_MEDIA: Media = { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2 };
 
 const SOURCES: { key: SourceKey; label: string; hint: string }[] = [
   { key: "materials", label: "部门物料", hint: "采购入库的物料与试剂" },
@@ -46,6 +50,7 @@ export default function LabelPrintPage() {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [copies, setCopies] = useState(1);
+  const [media, setMedia] = useState<Media>(FALLBACK_MEDIA);
 
   const ids = useMemo(() => [...selected], [selected]);
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
@@ -67,6 +72,7 @@ export default function LabelPrintPage() {
       setPage(itemData.page);
       setPageSize(itemData.page_size);
       setPrinters(printerData.printers);
+      api<Media>("/api/v1/label-print/media").then(setMedia, () => {});
       if (!printerId || !printerData.printers.some((p) => String(p.id) === printerId)) {
         setPrinterId(String(printerData.printers.find((p) => p.is_default)?.id ?? printerData.printers[0]?.id ?? ""));
       }
@@ -145,6 +151,8 @@ export default function LabelPrintPage() {
   }
 
   const value = (item: Item, key: string) => String(item[key] ?? "") || "—";
+  const slotSize = `${Math.round(media.slot_width_mm)} × ${Math.round(media.slot_height_mm)}`;
+  const sheetSize = `${media.width_mm} × ${media.height_mm} mm`;
 
   return (
     <>
@@ -202,7 +210,7 @@ export default function LabelPrintPage() {
           {TEMPLATES.map((t) => (
             <label key={t.key} style={{ display: "flex", gap: 6, alignItems: "center", marginRight: 12 }}>
               <input type="radio" name="template" style={{ minHeight: 0 }} checked={template === t.key} onChange={() => switchTemplate(t.key)} />
-              {t.label}<span className="muted">{t.hint}</span>
+              {t.label}<span className="flag">{slotSize} mm</span><span className="muted">{t.hint}</span>
             </label>
           ))}
         </div>
@@ -223,6 +231,7 @@ export default function LabelPrintPage() {
           <span>已选 <strong>{ids.length}</strong> 条</span>
           <span className="muted">双列纸约 {sheets} 张</span>
           <button className="link" onClick={() => { setSelected(new Set()); setPreview(null); }} disabled={!ids.length}>清空选择</button>
+          <span className="muted">纸张 {sheetSize} · {media.columns} 列</span>
           <span className="spacer" />
           <label className="field">份数
             <input type="number" min={1} max={20} step={1} style={{ width: 80 }} value={copies} onChange={(e) => setCopies(Math.min(20, Math.max(1, Number(e.target.value) || 1)))} />
@@ -248,7 +257,17 @@ export default function LabelPrintPage() {
             模板：{TEMPLATES.find((t) => t.key === (preview.template ?? template))?.label ?? template}；
             字段：{preview.fields.map((key) => fields.find((f) => f.key === key)?.label ?? key).join("、")}
           </p>
-          <div className="preview-grid">{preview.images.map((image, i) => <figure key={i} style={{ margin: 0 }}><img src={`data:image/png;base64,${image}`} alt={`第 ${i + 1} 张标签纸预览`} style={{ maxWidth: 480 }} /><figcaption>第 {i + 1} 张标签纸</figcaption></figure>)}</div>
+          <div className="preview-grid">{preview.images.map((image, i) => (
+            <figure key={i} className="label-figure">
+              <div className="label-frame">
+                <span className="label-dim">整张 {(preview.media?.width_mm ?? media.width_mm)} × {(preview.media?.height_mm ?? media.height_mm)} mm</span>
+                <img src={`data:image/png;base64,${image}`} alt={`第 ${i + 1} 张标签纸预览`} />
+                <span className="label-cut" aria-hidden="true" />
+                <span className="label-dim slot">单格 {slotSize} mm</span>
+              </div>
+              <figcaption className="muted">第 {i + 1} 张标签纸 · 预览按实际比例等比显示</figcaption>
+            </figure>
+          ))}</div>
           <button className="primary" onClick={() => void print()} disabled={busy !== "" || !printerId}>确认打印（{copies} 份）</button>
         </section>
       )}

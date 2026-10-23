@@ -12,7 +12,7 @@ const web = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = await mkdtemp(join(tmpdir(), 'label-print-ui-'));
 const evidence = '/Users/wangyichuan/selfapp/ProjectInbox/work/evidence/TASK-87';
 await mkdir(evidence, { recursive: true });
-const sampleLabel = (await readFile('/Users/wangyichuan/localissue/myserver/labelprint/preview/sample1.png')).toString('base64');
+const sampleLabel = (await readFile('/Users/wangyichuan/localissue/myserver/labelprint-task-87/preview/two-up-sample.png')).toString('base64');
 
 const fieldsBySource = {
   materials: [{ key: 'item_name', label: '物料名称' }, { key: 'material_code', label: '物料编码' }, { key: 'spec_model', label: '规格型号' }, { key: 'brand', label: '品牌' }, { key: 'department', label: '部门' }, { key: 'unit', label: '单位' }],
@@ -71,6 +71,7 @@ try {
       return route.fulfill({ json: { source, items, total: items.length, page: 1, page_size: 20, fields: fieldsBySource[source], columns: columnsBySource[source] } });
     }
     if (url.pathname.endsWith('/printers')) return route.fulfill({ json: { printers } });
+    if (url.pathname.endsWith('/media')) return route.fulfill({ json: { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2 } });
     if (url.pathname.endsWith('/preview')) { previewRequests += 1; previewBody = req.postDataJSON(); return route.fulfill({ json: { images: [sampleLabel], count: previewBody.ids.length, media_count: 1, fields: previewBody.fields, template: previewBody.template, layout: 'two-up' } }); }
     if (url.pathname.endsWith('/print')) { printRequests += 1; printBody = req.postDataJSON(); return route.fulfill({ json: { message: '已送出 2 张', sent: 2, printer: '示例打印机 A' } }); }
     return route.fulfill({ status: 404, json: { error: 'unexpected route' } });
@@ -104,6 +105,12 @@ try {
   assert.equal(previewBody?.template, 'name-only');
   assert.deepEqual(previewBody?.fields, ['item_name', 'spec_model']);
   assert.equal(await page.getByAltText(/标签纸预览/).count(), 1);
+  // 模板带规格标注，预览有虚拟外框与长宽小字
+  assert.ok(await page.getByText('整张 59.5 × 15.1 mm').count() >= 1);
+  assert.ok(await page.getByText('单格 30 × 15 mm').count() >= 1);
+  assert.ok(await page.locator('.label-frame').count() === 1);
+  const boxA = await page.locator('.label-frame img').boundingBox();
+  assert.ok(boxA && Math.abs(boxA.height / boxA.width - 178 / 703) < 0.02, `预览比例 ${boxA?.height}/${boxA?.width} 应等于 703:178`);
 
   const printerSelect = page.getByLabel('打印机');
   assert.equal(await printerSelect.locator('option:disabled').count(), 1);
@@ -115,9 +122,16 @@ try {
   assert.equal(printBody?.source, 'materials');
   await page.screenshot({ path: join(evidence, 'after-label-print.png'), fullPage: true });
 
+  // 换模板再预览：外框尺寸保持不变，说明预览不会因字号变化而"变大变小"
+  await page.getByText('等宽全字段').click();
+  await page.getByRole('button', { name: '预览', exact: true }).click();
+  await page.getByRole('heading', { name: '预览' }).waitFor();
+  const boxB = await page.locator('.label-frame img').boundingBox();
+  assert.ok(boxA && boxB && Math.abs(boxA.width - boxB.width) < 1 && Math.abs(boxA.height - boxB.height) < 1, '不同模板的预览外框尺寸应一致');
+
   console.log(JSON.stringify({
     status: 'passed',
-    checks: ['三种来源切换与清空选择', '分页信息', '多选物料', '份数提交', '仅名称模板预览', '离线打印机不可选', '提交打印结果提示'],
+    checks: ['三种来源切换与清空选择', '分页信息', '多选物料', '份数提交', '模板规格标注', '预览外框与长宽标注', '换模板预览尺寸不变', '离线打印机不可选', '提交打印结果提示'],
     screenshots: evidence,
   }));
 } finally {

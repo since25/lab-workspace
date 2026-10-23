@@ -41,6 +41,15 @@ p { margin: 0 0 12px; line-height: 1.6; }
 
 main { max-width: 1320px; margin: 0 auto; padding: 24px; }
 
+.label-figure { margin: 0; }
+.label-frame { position: relative; width: min(560px, 100%); border: 1px solid #b9b9b9; background: #fff; line-height: 0; }
+.label-frame img { display: block; width: 100%; height: auto; }
+.label-dim { position: absolute; z-index: 1; font-size: 11px; line-height: 16px; color: var(--muted); background: var(--surface); padding: 0 4px; border: 1px solid var(--border); border-radius: 3px; }
+.label-frame > .label-dim { top: -10px; left: 8px; }
+.label-dim.slot { top: auto; bottom: 4px; right: 6px; }
+.label-figure figcaption { margin-top: 8px; font-size: 12px; }
+.label-cut { position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px dashed #cfcfcf; }
+
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 16px; }
 
 .toolbar { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
