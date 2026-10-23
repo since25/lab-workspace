@@ -11,14 +11,15 @@ describe("标签来源与字段", () => {
   it("默认来源是部门物料，未知来源被拒绝", () => {
     expect(parseSource(undefined)).toBe("materials");
     expect(parseSource("assets")).toBe("assets");
-    expect(() => parseSource("cells")).toThrow("未知的打印来源");
+    expect(parseSource("freezer")).toBe("freezer");
+    expect(() => parseSource("consumables")).toThrow("未知的打印来源");
   });
 
   it("字段白名单按来源校验并保持选择顺序", () => {
     expect(parseSourceFields("materials", ["material_code", "item_name", "unknown"])).toEqual(["material_code", "item_name"]);
     expect(parseSourceFields("assets", ["asset_code", "asset_name"])).toEqual(["asset_code", "asset_name"]);
     expect(() => parseSourceFields("materials", [])).toThrow("至少一个有效打印字段");
-    expect(() => parseSourceFields("consumables", ["asset_code"])).toThrow("至少一个有效打印字段");
+    expect(() => parseSourceFields("freezer", ["asset_code"])).toThrow("至少一个有效打印字段");
   });
 
   it("三个来源各自声明字段，名称都可作为标题", () => {
@@ -26,7 +27,7 @@ describe("标签来源与字段", () => {
       expect(source.fields.length).toBeGreaterThan(2);
       expect(source.columns.length).toBeGreaterThan(1);
     }
-    expect(SOURCES.map((s) => s.key)).toEqual(["materials", "consumables", "assets"]);
+    expect(SOURCES.map((s) => s.key)).toEqual(["materials", "freezer", "assets"]);
   });
 });
 
@@ -38,6 +39,15 @@ describe("标签行生成", () => {
       ["item_name", "material_code", "brand", "spec_model"],
     );
     expect(rows).toEqual([{ sample: "琼脂糖", note: "物料编码：M-1；规格型号：500g" }]);
+  });
+
+  it("冰箱样品用样品信息与项目号", () => {
+    const rows = labelRows(
+      [{ id: 9, name: "HeLa P3", project_no: "P2026-01", sample_type: "细胞", location: "-80 1号（-80℃） · 第1层 · 盒子「A」", stored_on: "2026-10-01" }],
+      "freezer",
+      ["name", "project_no", "sample_type"],
+    );
+    expect(rows).toEqual([{ sample: "HeLa P3", note: "项目号：P2026-01；样品类型：细胞" }]);
   });
 
   it("固定资产用资产名称与编号", () => {

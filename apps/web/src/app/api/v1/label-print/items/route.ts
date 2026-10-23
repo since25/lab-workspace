@@ -5,7 +5,7 @@ import { requireLabelPrinting } from "@/lib/label-print";
 import { listSourceItems, parseSource } from "@/lib/label-sources";
 
 export const GET = handle(async (req: Request) => {
-  requireLabelPrinting(await requireUser());
+  const user = requireLabelPrinting(await requireUser());
   const sp = new URL(req.url).searchParams;
-  return ok(await listSourceItems(query, parseSource(sp.get("source")), sp));
+  return ok(await listSourceItems(query, parseSource(sp.get("source")), sp, user));
 });

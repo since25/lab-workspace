@@ -19,7 +19,7 @@ export const POST = handle(async (req: Request) => {
   if (!Number.isSafeInteger(printerId) || printerId <= 0) throw new HttpError(400, "请选择打印机");
   const [printer] = await listPrinters(query, true).then((rows) => rows.filter((p) => p.id === printerId && p.enabled));
   if (!printer) throw new HttpError(400, "打印机不存在或已停用，请刷新后重试");
-  const items = await getSourceItems(query, source, ids);
+  const items = await getSourceItems(query, source, ids, user);
   const rows = labelRows(items, source, fields);
   try {
     await query(

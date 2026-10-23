@@ -16,12 +16,12 @@ const sampleLabel = (await readFile('/Users/wangyichuan/localissue/myserver/labe
 
 const fieldsBySource = {
   materials: [{ key: 'item_name', label: '物料名称' }, { key: 'material_code', label: '物料编码' }, { key: 'spec_model', label: '规格型号' }, { key: 'brand', label: '品牌' }, { key: 'department', label: '部门' }, { key: 'unit', label: '单位' }],
-  consumables: [{ key: 'item_name', label: '耗材名称' }, { key: 'spec_model', label: '规格型号' }, { key: 'brand', label: '品牌' }, { key: 'stock', label: '库存' }, { key: 'category', label: '分类' }],
+  freezer: [{ key: 'name', label: '样品信息' }, { key: 'project_no', label: '项目号' }, { key: 'sample_type', label: '样品类型' }, { key: 'location', label: '位置' }, { key: 'stored_on', label: '存入日期' }, { key: 'remarks', label: '备注' }],
   assets: [{ key: 'asset_name', label: '资产名称' }, { key: 'asset_code', label: '资产编号' }, { key: 'spec_model', label: '规格型号' }, { key: 'location', label: '存放地点' }, { key: 'user_name', label: '使用人' }, { key: 'department', label: '使用部门' }],
 };
 const columnsBySource = {
   materials: [{ key: 'item_name', label: '名称' }, { key: 'material_code', label: '物料编码' }, { key: 'brand', label: '品牌' }, { key: 'spec_model', label: '规格型号' }, { key: 'department', label: '部门' }],
-  consumables: [{ key: 'item_name', label: '名称' }, { key: 'spec_model', label: '规格型号' }, { key: 'brand', label: '品牌' }, { key: 'stock', label: '库存' }, { key: 'category', label: '分类' }],
+  freezer: [{ key: 'name', label: '样品信息' }, { key: 'project_no', label: '项目号' }, { key: 'sample_type', label: '样品类型' }, { key: 'location', label: '位置' }, { key: 'stored_on', label: '存入日期' }],
   assets: [{ key: 'asset_name', label: '名称' }, { key: 'asset_code', label: '资产编号' }, { key: 'spec_model', label: '规格型号' }, { key: 'location', label: '存放地点' }, { key: 'user_name', label: '使用人' }],
 };
 const itemsBySource = {
@@ -30,9 +30,9 @@ const itemsBySource = {
     { id: 2, item_name: '示例耗材乙', material_code: 'EXAMPLE-M-2', brand: '示例品牌乙', spec_model: 'EXAMPLE-SPEC-2', department: '示例部门', unit: '盒' },
     { id: 3, item_name: '示例耗材丙', material_code: 'EXAMPLE-M-3', brand: '示例品牌丙', spec_model: 'EXAMPLE-SPEC-3', department: '示例部门', unit: '瓶' },
   ],
-  consumables: [
-    { id: 11, item_name: '示例吸头槽位', spec_model: '200µL 滤芯', brand: '示例品牌', stock: '3盒', category: '塑料耗材' },
-    { id: 12, item_name: '示例培养板槽位', spec_model: '96 孔 TC', brand: '示例品牌', stock: '1包', category: '细胞耗材' },
+  freezer: [
+    { id: 11, name: '示例样品甲', project_no: 'P-001', sample_type: '细胞', location: '-80 1号（-80℃） · 第1层 · 盒子「A」', stored_on: '2026-10-01' },
+    { id: 12, name: '示例样品乙', project_no: 'P-002', sample_type: '质粒', location: '-20 1号（-20℃） · 第2层 · 盒子「B」', stored_on: '2026-10-02' },
   ],
   assets: [
     { id: 21, asset_name: '示例 PCR 仪', asset_code: 'EXAMPLE-CMC-1', spec_model: '示例型号', location: '示例房间', user_name: '示例使用人' },
@@ -52,7 +52,8 @@ try {
   });
   server = createServer(async (req, res) => {
     if (req.url === '/app.js') { res.setHeader('content-type', 'text/javascript'); res.end(await readFile(join(stage, 'app.js'))); return; }
-    res.setHeader('content-type', 'text/html; charset=utf-8'); res.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
+    if (req.url === '/app.css') { res.setHeader('content-type', 'text/css'); res.end(await readFile(join(stage, 'app.css')).catch(() => '')); return; }
+    res.setHeader('content-type', 'text/html; charset=utf-8'); res.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
   });
   await new Promise((resolveServer) => server.listen(0, '127.0.0.1', resolveServer));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -83,8 +84,8 @@ try {
   // 来源切换会清空选择
   await page.getByLabel('选择 示例耗材甲').check();
   await page.getByText(/已选 1 条/).waitFor();
-  await page.getByRole('button', { name: '常用耗材' }).click();
-  await page.getByText('示例吸头槽位', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '冰箱样品' }).click();
+  await page.getByText('示例样品甲', { exact: true }).waitFor();
   await page.getByText('共 2 条 · 第 1 / 1 页').waitFor();
   await page.getByText(/已选 0 条/).waitFor();
   assert.equal(await page.getByText(/已选 1 条/).count(), 0);

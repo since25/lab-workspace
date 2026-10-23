@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, errText } from "@/lib/client";
 
-type SourceKey = "materials" | "consumables" | "assets";
+type SourceKey = "materials" | "freezer" | "assets";
 type Item = Record<string, string | number | boolean> & { id: number };
 type Field = { key: string; label: string };
 type Printer = { id: number; printer_key: string; name: string; enabled: boolean; is_default: boolean; ready?: boolean; reason?: string; jobs?: number; notes?: string };
@@ -11,7 +11,7 @@ type Preview = { images: string[]; count: number; media_count?: number; fields: 
 
 const SOURCES: { key: SourceKey; label: string; hint: string }[] = [
   { key: "materials", label: "部门物料", hint: "采购入库的物料与试剂" },
-  { key: "consumables", label: "常用耗材", hint: "固定规格槽位与当前库存" },
+  { key: "freezer", label: "冰箱样品", hint: "在库样品、项目号与位置" },
   { key: "assets", label: "固定资产", hint: "设备与台账资产" },
 ];
 
@@ -23,7 +23,7 @@ const TEMPLATES: { key: string; label: string; hint: string }[] = [
 
 const DEFAULT_FIELDS: Record<SourceKey, string[]> = {
   materials: ["item_name", "material_code", "spec_model"],
-  consumables: ["item_name", "spec_model", "brand"],
+  freezer: ["name", "project_no", "sample_type"],
   assets: ["asset_name", "asset_code", "spec_model"],
 };
 
