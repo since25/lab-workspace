@@ -12,7 +12,7 @@ const web = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = await mkdtemp(join(tmpdir(), 'label-print-ui-'));
 const evidence = '/Users/wangyichuan/selfapp/ProjectInbox/work/evidence/TASK-87';
 await mkdir(evidence, { recursive: true });
-const sampleLabel = (await readFile('/Users/wangyichuan/localissue/myserver/labelprint-task-87/preview/two-up-sample.png')).toString('base64');
+const sampleLabel = (await readFile(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/two-up-sample.png'))).toString('base64');
 
 const fieldsBySource = {
   materials: [{ key: 'item_name', label: '物料名称' }, { key: 'material_code', label: '物料编码' }, { key: 'spec_model', label: '规格型号' }, { key: 'brand', label: '品牌' }, { key: 'department', label: '部门' }, { key: 'unit', label: '单位' }],
