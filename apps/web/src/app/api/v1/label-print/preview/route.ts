@@ -1,14 +1,16 @@
 import { requireUser } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { handle, ok, readJson } from "@/lib/http";
-import { callLabelPrint, getPrintableMaterials, materialLabelRows, parseMaterialIds, parsePrintFields, parsePrintTemplate, requireLabelPrinting } from "@/lib/label-print";
+import { callLabelPrint, requireLabelPrinting } from "@/lib/label-print";
+import { getSourceItems, labelRows, parseItemIds, parseSource, parseSourceFields, parseTemplate } from "@/lib/label-sources";
 
 export const POST = handle(async (req: Request) => {
   requireLabelPrinting(await requireUser());
   const body = await readJson(req);
-  const template = parsePrintTemplate(body.template);
-  const fields = parsePrintFields(body.fields);
-  const items = await getPrintableMaterials(query, parseMaterialIds(body.ids));
-  const result = await callLabelPrint("/api/preview", { rows: materialLabelRows(items, fields), layout: "two-up" });
-  return ok({ ...result, template, fields, count: items.length });
+  const source = parseSource(body.source);
+  const template = parseTemplate(body.template);
+  const fields = parseSourceFields(source, body.fields);
+  const items = await getSourceItems(query, source, parseItemIds(body.ids));
+  const result = await callLabelPrint("/api/preview", { rows: labelRows(items, source, fields), layout: "two-up", template });
+  return ok({ ...result, source, template, fields, count: items.length });
 });

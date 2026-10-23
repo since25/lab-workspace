@@ -148,4 +148,6 @@
 
 ### label_printers / label_print_jobs（TASK-87）
 
-`label_printers` 是全局打印机目录，保存工作台显示名、传给本机标签服务的 `printer_key`、启用状态和默认标记。`label_print_jobs` 记录请求编号、用户、设备、模板、字段、行数和送出状态，用唯一 `request_id` 防止重复提交；不保存标签原始内容。
+`label_printers` 是全局打印机目录，保存工作台显示名、传给本机标签服务的 `printer_key`、启用状态和默认标记。`label_print_jobs` 记录请求编号、用户、设备、模板、字段、行数和送出状态，用唯一 `request_id` 防止重复提交；不保存标签原始内容。`template` 存 `来源:模板`（如 `materials:name-only`），便于回溯当时的数据来源与版式。
+
+标签打印的数据来源与字段白名单在 `apps/web/src/lib/label-sources.ts` 一处声明（部门物料、常用耗材、固定资产），页面表格、接口校验和标签行生成都由它派生；新增来源只需补一段取数 SQL。

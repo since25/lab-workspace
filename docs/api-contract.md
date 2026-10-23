@@ -108,8 +108,8 @@
 - `POST /admin/users`
 - `PATCH /admin/users/:id`：启用/停用、角色、`freezer_view_all`（冰箱总览）、`label_print_enabled`（标签打印可见性）、显示名、重置密码（停用或重置后该用户现有登录失效）
 - `GET /admin/audit-logs`
-- `GET /label-print/materials`：登录且账号开通标签打印时，按部门物料筛选**分页**返回可打印记录和字段白名单；参数 `q`、`page`、`page_size`（默认 20，最多 100），返回 `total`、`page`、`page_size`；未开通的账号返回 403。
+- `GET /label-print/items`：按 `source` 分页返回可打印记录、字段与表格列白名单。`source` 取 `materials`（部门物料）、`consumables`（常用耗材槽位）、`assets`（固定资产）；参数 `q`、`page`、`page_size`（默认 20，最多 100），返回 `total`、`page`、`page_size`；未开通标签打印的账号返回 403。部门物料与固定资产的展示部门沿用各自页面的配置。
 - `GET /label-print/printers`：返回启用的全局打印机及通过本机标签服务查询到的状态。
-- `POST /label-print/preview`：`{ids, fields, template:"material-v1"}`，按物料名称、物料编码、规格型号、品牌生成预览；不打印。工作台代理到标签服务时使用 `layout:"two-up"`：按选择顺序两两排入 30×15 mm 双列标签纸，奇数最后一条落左列、右列留空。
-- `POST /label-print/print`：`{request_id, ids, fields, template:"material-v1", printer_id, copies}`，`copies` 取 1–20（默认 1）；服务端校验账号开关、物料范围和启用设备后代理到 `LABELPRINT_URL`，并附带 `layout:"two-up"`；同一 `request_id` 只能提交一次。标签服务未带布局参数时保留旧的单幅标签兼容行为。
+- `POST /label-print/preview`：`{source, ids, fields, template}`，生成预览位图；不打印。`template` 取 `name-detail`（名称大字 + 字段逐行，默认）、`uniform`（全字段等宽）、`name-only`（仅名称、超大字号）。工作台代理到标签服务时带 `layout:"two-up"` 与同一个 `template`：按选择顺序两两排入 30×15 mm 双列标签纸，奇数最后一条落左列、右列留空。
+- `POST /label-print/print`：`{request_id, source, ids, fields, template, printer_id, copies}`，`copies` 取 1–20（默认 1）；服务端校验账号开关、来源范围、字段白名单和启用设备后代理到 `LABELPRINT_URL`，并附带 `layout:"two-up"` 与 `template`；同一 `request_id` 只能提交一次。标签服务未带布局参数时保留旧的单幅标签兼容行为。
 - `GET/POST /admin/printers`、`PATCH /admin/printers/:id`：仅管理员管理全局打印机目录。
