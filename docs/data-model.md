@@ -140,3 +140,10 @@
 `metadata_json` 禁止写入序列、密码、原始文件内容和敏感样本信息。
 
 结构定义见 `db/migrations/`。
+### tenants / users.tenant_id（TASK-87）
+
+`tenants` 保存租户名称、启用状态和 `label_print_enabled` 标签打印开关。每个账号通过 `users.tenant_id` 归属一个租户；本轮只用该边界控制标签打印，既有物料、细胞、资产等业务表仍沿用原共享口径。
+
+### label_printers / label_print_jobs（TASK-87）
+
+`label_printers` 是全局打印机目录，保存工作台显示名、传给本机标签服务的 `printer_key`、启用状态和默认标记。`label_print_jobs` 记录请求编号、租户、用户、设备、模板、字段、行数和送出状态，用唯一 `request_id` 防止重复提交；不保存标签原始内容。

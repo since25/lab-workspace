@@ -12,24 +12,26 @@ interface User {
   freezer_view_all: boolean;
   is_active: boolean;
   locked_until: string | null;
+  tenant_id: number;
+  tenant_name: string;
 }
+interface Tenant { id: number; name: string; label_print_enabled: boolean; }
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
-  const [form, setForm] = useState({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false });
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [form, setForm] = useState({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false, tenant_id: "" });
   const [error, setError] = useState("");
 
-  const load = () => api<{ users: User[] }>("/api/v1/admin/users").then((d) => setUsers(d.users), (e) => setError(errText(e)));
-  useEffect(() => {
-    load();
-  }, []);
+  const load = () => Promise.all([api<{ users: User[] }>("/api/v1/admin/users"), api<{ tenants: Tenant[] }>("/api/v1/admin/tenants")]).then(([u, t]) => { setUsers(u.users); setTenants(t.tenants); if (!form.tenant_id && t.tenants[0]) setForm((old) => ({ ...old, tenant_id: String(t.tenants[0].id) })); }, (e) => setError(errText(e)));
+  useEffect(() => { load(); }, []);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     try {
       await api("/api/v1/admin/users", { method: "POST", body: JSON.stringify(form) });
-      setForm({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false });
+      setForm({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false, tenant_id: tenants[0] ? String(tenants[0].id) : "" });
       load();
     } catch (err) {
       setError(errText(err));
@@ -67,6 +69,12 @@ export default function UsersPage() {
               onChange={(v) => setForm({ ...form, role: v })}
             />
           </label>
+          <label className="field">租户
+            <select value={form.tenant_id} onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} required>
+              <option value="">请选择租户</option>
+              {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}{t.label_print_enabled ? "（已开放打印）" : ""}</option>)}
+            </select>
+          </label>
           {form.role === "member" && (
             <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input type="checkbox" style={{ minHeight: 0 }} checked={form.freezer_view_all} onChange={(e) => setForm({ ...form, freezer_view_all: e.target.checked })} />
@@ -77,7 +85,7 @@ export default function UsersPage() {
         {error && <div className="error">{error}</div>}
         <button className="primary">创建账号</button>
       </form>
-      <p className="muted">「冰箱总览」：普通成员开启后，可在冰箱管理中只读查看全部人员存放的内容，其他权限不变；管理员本身即可查看。</p>
+      <p className="muted">「冰箱总览」：普通成员开启后，可在冰箱管理中只读查看全部人员存放的内容，其他权限不变；管理员本身即可查看。租户只决定账号归属和标签打印开关。</p>
       <div className="table-wrap">
         <table>
           <thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th></th></tr></thead>
@@ -85,7 +93,7 @@ export default function UsersPage() {
             {users.map((u) => (
               <tr key={u.id}>
                 <td>{u.username}</td>
-                <td>{u.display_name}</td>
+                <td>{u.display_name}<div className="muted">{u.tenant_name}</div></td>
                 <td>
                   {u.role === "admin" ? "管理员" : "普通成员"}
                   {u.role === "member" && u.freezer_view_all && <> <span className="flag">冰箱总览</span></>}
@@ -104,6 +112,7 @@ export default function UsersPage() {
                       {u.freezer_view_all ? "取消冰箱总览" : "开启冰箱总览"}
                     </button>
                   )}
+                  {tenants.length > 1 && <select aria-label={`${u.display_name} 的租户`} value={u.tenant_id} onChange={(e) => patch(u, { tenant_id: Number(e.target.value) })}>{tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
                   <button className="link" onClick={() => patch(u, { is_active: !u.is_active })}>{u.is_active ? "停用" : "启用"}</button>
                 </td>
               </tr>

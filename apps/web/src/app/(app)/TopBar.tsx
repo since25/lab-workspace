@@ -18,6 +18,8 @@ const LINKS = [
 ];
 const ADMIN_LINKS = [
   { href: "/admin/users", label: "账号管理" },
+  { href: "/admin/tenants", label: "租户管理" },
+  { href: "/admin/printers", label: "打印机管理" },
   { href: "/admin/materials", label: "物料审批" },
   { href: "/admin/materials/reconcile", label: "库存校对" },
   { href: "/admin/audit", label: "操作记录" },
@@ -25,7 +27,10 @@ const ADMIN_LINKS = [
 
 export default function TopBar({ user }: { user: SessionUser }) {
   const path = usePathname();
-  const links = user.role === "admin" ? [...LINKS, ...ADMIN_LINKS] : LINKS;
+  const links = [
+    ...(user.label_print_enabled ? [{ href: "/label-print", label: "标签打印" }] : []),
+    ...(user.role === "admin" ? [...LINKS, ...ADMIN_LINKS] : LINKS),
+  ];
   // 取最长前缀，避免 /materials 与 /materials/stock 同时高亮。
   const activeHref = links
     .filter((l) => path === l.href || path.startsWith(`${l.href}/`))

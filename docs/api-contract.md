@@ -108,3 +108,9 @@
 - `POST /admin/users`
 - `PATCH /admin/users/:id`：启用/停用、角色、`freezer_view_all`（冰箱总览）、显示名、重置密码（停用或重置后该用户现有登录失效）
 - `GET /admin/audit-logs`
+- `GET /label-print/materials`：登录且当前租户开启标签打印时，按部门物料筛选返回最多 500 条可打印记录和字段白名单；关闭租户返回 404。
+- `GET /label-print/printers`：返回启用的全局打印机及通过本机标签服务查询到的状态。
+- `POST /label-print/preview`：`{ids, fields, template:"material-v1"}`，按物料名称、物料编码、规格型号、品牌生成预览；不打印。工作台代理到标签服务时使用 `layout:"two-up"`：按选择顺序两两排入 30×15 mm 双列标签纸，奇数最后一条落左列、右列留空。
+- `POST /label-print/print`：`{request_id, ids, fields, template:"material-v1", printer_id}`，服务端校验租户开关、物料范围和启用设备后代理到 `LABELPRINT_URL`，并附带 `layout:"two-up"`；同一 `request_id` 只能提交一次。标签服务未带布局参数时保留旧的单幅标签兼容行为。
+- `GET/POST /admin/tenants`、`PATCH /admin/tenants/:id`：仅管理员管理租户与标签打印开关。
+- `GET/POST /admin/printers`、`PATCH /admin/printers/:id`：仅管理员管理全局打印机目录。
