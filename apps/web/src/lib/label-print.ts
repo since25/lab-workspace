@@ -26,7 +26,7 @@ export type PrintableMaterial = {
 };
 
 export function requireLabelPrinting(user: SessionUser) {
-  if (!user.label_print_enabled) throw new HttpError(404, "当前租户未开放标签打印");
+  if (!user.label_print_enabled) throw new HttpError(403, "当前账号未开通标签打印，请联系管理员");
   return user;
 }
 
@@ -49,6 +49,12 @@ export function parseMaterialIds(value: unknown): number[] {
   return [...new Set(value as number[])];
 }
 
+export function parseCopies(value: unknown): number {
+  const copies = Number(value ?? 1);
+  if (!Number.isSafeInteger(copies) || copies < 1 || copies > 20) throw new HttpError(400, "份数必须是 1 至 20 的整数");
+  return copies;
+}
+
 export function materialLabelRows(items: PrintableMaterial[], fields: PrintField[]) {
   const label = (item: PrintableMaterial, field: PrintField) => String(item[field] ?? "").trim();
   return items.map((item) => {
@@ -60,18 +66,23 @@ export function materialLabelRows(items: PrintableMaterial[], fields: PrintField
   });
 }
 
+export const MATERIAL_PAGE_SIZE = 20;
+
 export async function listPrintableMaterials(db: MaterialQuery, sp: URLSearchParams) {
   const departments = displayDepartments();
   const { where, params } = materialFilters(sp, departments);
+  const pageSize = Math.min(Math.max(Number(sp.get("page_size")) || MATERIAL_PAGE_SIZE, 1), 100);
+  const page = Math.max(Number(sp.get("page")) || 1, 1);
+  const [{ count }] = await db<{ count: number }>(`SELECT count(*)::int AS count FROM material_items m WHERE ${where}`, params);
   const items = await db<PrintableMaterial>(
     `SELECT m.id, m.item_name, m.material_code, m.brand, m.spec_model, m.unit, m.department, m.requester, m.is_used_up
        FROM material_items m WHERE ${where}
       ORDER BY ${orderBy(sp, {
         requested_on: "m.requested_on", item_name: "m.item_name", material_code: "m.material_code", brand: "m.brand", spec_model: "m.spec_model",
-      }, "m.item_name ASC, m.id ASC")} LIMIT 500`,
+      }, "m.item_name ASC, m.id ASC")} LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
     params,
   );
-  return { items, total: items.length, departments, limit: 500, fields: PRINT_FIELDS };
+  return { items, total: count, page, page_size: pageSize, departments, limit: 500, fields: PRINT_FIELDS };
 }
 
 export async function getPrintableMaterials(db: MaterialQuery, ids: number[]) {

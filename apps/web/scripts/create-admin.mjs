@@ -14,8 +14,8 @@ await client.connect();
 try {
   const hash = await bcrypt.hash(password, 12);
   await client.query(
-    `INSERT INTO users(username, display_name, password_hash, role, tenant_id)
-     VALUES ($1, $2, $3, 'admin', (SELECT id FROM tenants WHERE slug = 'default'))
+    `INSERT INTO users(username, display_name, password_hash, role)
+     VALUES ($1, $2, $3, 'admin')
      ON CONFLICT (username) DO UPDATE
        SET password_hash = EXCLUDED.password_hash, role = 'admin', is_active = true,
            failed_attempts = 0, locked_until = NULL, updated_at = now()`,

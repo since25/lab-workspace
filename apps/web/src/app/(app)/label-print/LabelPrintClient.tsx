@@ -27,19 +27,28 @@ export default function LabelPrintPage() {
   const [busy, setBusy] = useState<"load" | "preview" | "print" | "printer" | "">("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [copies, setCopies] = useState(1);
 
   const ids = useMemo(() => [...selected], [selected]);
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
+  const pages = Math.max(1, Math.ceil(total / pageSize));
 
-  const load = async () => {
+  const load = async (nextPage = page, nextSize = pageSize) => {
     setBusy("load");
     try {
       const [materialData, printerData] = await Promise.all([
-        api<{ items: Item[]; fields: Field[] }>(`/api/v1/label-print/materials?q=${encodeURIComponent(q)}`),
+        api<{ items: Item[]; fields: Field[]; total: number; page: number; page_size: number }>(
+          `/api/v1/label-print/materials?q=${encodeURIComponent(q)}&page=${nextPage}&page_size=${nextSize}`),
         api<{ printers: Printer[] }>("/api/v1/label-print/printers"),
       ]);
       setItems(materialData.items);
       setFields(materialData.fields);
+      setTotal(materialData.total);
+      setPage(materialData.page);
+      setPageSize(materialData.page_size);
       setPrinters(printerData.printers);
       if (!printerId || !printerData.printers.some((p) => String(p.id) === printerId)) {
         setPrinterId(String(printerData.printers.find((p) => p.is_default)?.id ?? printerData.printers[0]?.id ?? ""));
@@ -49,9 +58,9 @@ export default function LabelPrintPage() {
     finally { setBusy(""); }
   };
 
-  // 初次进入页面加载物料和打印机；搜索由回车/刷新按钮显式触发。
+  // 初次进入页面加载物料和打印机；搜索、翻页由按钮显式触发。
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(1); }, []);
 
   function toggleField(key: string) {
     setSelectedFields((old) => old.includes(key) ? old.filter((v) => v !== key) : [...old, key]);
@@ -91,7 +100,7 @@ export default function LabelPrintPage() {
     try {
       const result = await api<{ message?: string; sent?: number; printer?: string }>("/api/v1/label-print/print", {
         method: "POST",
-        body: JSON.stringify({ request_id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, ids, fields: selectedFields, template: "material-v1", printer_id: Number(printerId) }),
+        body: JSON.stringify({ request_id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, ids, fields: selectedFields, template: "material-v1", printer_id: Number(printerId), copies }),
       });
       setNotice(`${result.message || `已送出 ${result.sent ?? preview.count} 张`}，打印机：${result.printer || "已选设备"}`);
     } catch (e) { setError(errText(e)); }
@@ -104,9 +113,17 @@ export default function LabelPrintPage() {
       <p className="muted">从部门物料中选择记录，按一个内置模板批量生成标签。打印服务只接受工作台服务端请求。</p>
       <section className="panel">
         <div className="toolbar">
-          <label className="field">搜索物料<input value={q} placeholder="名称 / 货号 / 规格型号" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void load(); }} /></label>
-          <button onClick={() => void load()} disabled={busy !== ""}>刷新物料</button>
-          <span className="muted">当前显示 {items.length} 条，最多 500 条</span>
+          <label className="field">搜索物料<input value={q} placeholder="名称 / 货号 / 规格型号" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void load(1); }} /></label>
+          <button onClick={() => void load(1)} disabled={busy !== ""}>刷新物料</button>
+          <span className="muted">共 {total} 条，第 {page} / {pages} 页</span>
+          <span className="spacer" />
+          <label className="field">每页
+            <select value={pageSize} onChange={(e) => { const size = Number(e.target.value); setPageSize(size); void load(1, size); }}>
+              {[20, 50, 100].map((size) => <option key={size} value={size}>{size} 条</option>)}
+            </select>
+          </label>
+          <button onClick={() => void load(page - 1)} disabled={busy !== "" || page <= 1}>上一页</button>
+          <button onClick={() => void load(page + 1)} disabled={busy !== "" || page >= pages}>下一页</button>
         </div>
         <div className="toolbar">
           <strong>打印字段</strong>
@@ -133,6 +150,9 @@ export default function LabelPrintPage() {
             </select>
           </label>
           <div className="muted">{printers.map((printer) => <span key={printer.id} style={{ marginRight: 14 }}>{printer.name}：{printer.ready === false ? `未就绪${printer.reason ? `（${printer.reason}）` : ""}` : "就绪"}{printer.jobs ? `，队列 ${printer.jobs}` : ""}</span>)}</div>
+          <label className="field">份数
+            <input type="number" min={1} max={20} step={1} style={{ width: 80 }} value={copies} onChange={(e) => setCopies(Math.min(20, Math.max(1, Number(e.target.value) || 1)))} />
+          </label>
           <span className="spacer" />
           <button className="primary" onClick={() => void makePreview()} disabled={busy !== ""}>预览（已选 {ids.length} 条）</button>
         </div>
@@ -141,9 +161,9 @@ export default function LabelPrintPage() {
       </section>
       {preview && <section className="panel">
         <h2>预览</h2>
-        <p className="muted">共 {preview.count} 个标签，{preview.media_count ?? preview.images.length} 张标签纸；字段：{preview.fields.map((key) => fields.find((f) => f.key === key)?.label ?? key).join("、")}</p>
+        <p className="muted">共 {preview.count} 个标签，{preview.media_count ?? preview.images.length} 张标签纸；份数 {copies}；字段：{preview.fields.map((key) => fields.find((f) => f.key === key)?.label ?? key).join("、")}</p>
         <div className="preview-grid">{preview.images.map((image, i) => <figure key={i} style={{ margin: 0 }}><img src={`data:image/png;base64,${image}`} alt={`第 ${i + 1} 张标签纸预览`} style={{ maxWidth: 480 }} /><figcaption>第 {i + 1} 张标签纸</figcaption></figure>)}</div>
-        <button className="primary" onClick={() => void print()} disabled={busy !== "" || !printerId}>确认打印</button>
+        <button className="primary" onClick={() => void print()} disabled={busy !== "" || !printerId}>确认打印（{copies} 份）</button>
       </section>}
     </>
   );

@@ -31,11 +31,9 @@ export const PATCH = handle(async (req: Request, ctx: RouteContext<"/api/v1/admi
     set("freezer_view_all", body.freezer_view_all);
     meta.freezer_view_all = body.freezer_view_all;
   }
-  if (body.tenant_id !== undefined) {
-    const tenantId = Number(body.tenant_id);
-    if (!Number.isSafeInteger(tenantId) || tenantId <= 0) throw new HttpError(400, "租户编号无效");
-    set("tenant_id", tenantId);
-    meta.tenant_id = tenantId;
+  if (typeof body.label_print_enabled === "boolean") {
+    set("label_print_enabled", body.label_print_enabled);
+    meta.label_print_enabled = body.label_print_enabled;
   }
   if (body.display_name !== undefined) {
     if (!str(body.display_name)) throw new HttpError(400, "显示名不能为空");

@@ -10,20 +10,17 @@ interface User {
   display_name: string;
   role: "admin" | "member";
   freezer_view_all: boolean;
+  label_print_enabled: boolean;
   is_active: boolean;
   locked_until: string | null;
-  tenant_id: number;
-  tenant_name: string;
 }
-interface Tenant { id: number; name: string; label_print_enabled: boolean; }
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [form, setForm] = useState({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false, tenant_id: "" });
+  const [form, setForm] = useState({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false, label_print_enabled: true });
   const [error, setError] = useState("");
 
-  const load = () => Promise.all([api<{ users: User[] }>("/api/v1/admin/users"), api<{ tenants: Tenant[] }>("/api/v1/admin/tenants")]).then(([u, t]) => { setUsers(u.users); setTenants(t.tenants); if (!form.tenant_id && t.tenants[0]) setForm((old) => ({ ...old, tenant_id: String(t.tenants[0].id) })); }, (e) => setError(errText(e)));
+  const load = () => api<{ users: User[] }>("/api/v1/admin/users").then((u) => setUsers(u.users), (e) => setError(errText(e)));
   useEffect(() => { load(); }, []);
 
   async function create(e: React.FormEvent) {
@@ -31,7 +28,7 @@ export default function UsersPage() {
     setError("");
     try {
       await api("/api/v1/admin/users", { method: "POST", body: JSON.stringify(form) });
-      setForm({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false, tenant_id: tenants[0] ? String(tenants[0].id) : "" });
+      setForm({ username: "", display_name: "", password: "", role: "member", freezer_view_all: false, label_print_enabled: true });
       load();
     } catch (err) {
       setError(errText(err));
@@ -69,23 +66,21 @@ export default function UsersPage() {
               onChange={(v) => setForm({ ...form, role: v })}
             />
           </label>
-          <label className="field">租户
-            <select value={form.tenant_id} onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} required>
-              <option value="">请选择租户</option>
-              {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}{t.label_print_enabled ? "（已开放打印）" : ""}</option>)}
-            </select>
-          </label>
           {form.role === "member" && (
             <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input type="checkbox" style={{ minHeight: 0 }} checked={form.freezer_view_all} onChange={(e) => setForm({ ...form, freezer_view_all: e.target.checked })} />
               冰箱总览（只读查看全部人员的冰箱内容）
             </label>
           )}
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="checkbox" style={{ minHeight: 0 }} checked={form.label_print_enabled} onChange={(e) => setForm({ ...form, label_print_enabled: e.target.checked })} />
+            标签打印（可见「标签打印」入口）
+          </label>
         </div>
         {error && <div className="error">{error}</div>}
         <button className="primary">创建账号</button>
       </form>
-      <p className="muted">「冰箱总览」：普通成员开启后，可在冰箱管理中只读查看全部人员存放的内容，其他权限不变；管理员本身即可查看。租户只决定账号归属和标签打印开关。</p>
+      <p className="muted">「冰箱总览」和「标签打印」都是账号级附加权限：前者可只读查看全部人员的冰箱内容，后者决定是否显示「标签打印」入口并能提交打印；管理员本身即可查看冰箱总览，标签打印按开关执行。不涉及登录与停用。</p>
       <div className="table-wrap">
         <table>
           <thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th></th></tr></thead>
@@ -93,10 +88,11 @@ export default function UsersPage() {
             {users.map((u) => (
               <tr key={u.id}>
                 <td>{u.username}</td>
-                <td>{u.display_name}<div className="muted">{u.tenant_name}</div></td>
+                <td>{u.display_name}</td>
                 <td>
                   {u.role === "admin" ? "管理员" : "普通成员"}
                   {u.role === "member" && u.freezer_view_all && <> <span className="flag">冰箱总览</span></>}
+                  {u.label_print_enabled && <> <span className="flag">标签打印</span></>}
                 </td>
                 <td>
                   {u.is_active ? "正常" : <span className="muted">已停用</span>}
@@ -112,7 +108,9 @@ export default function UsersPage() {
                       {u.freezer_view_all ? "取消冰箱总览" : "开启冰箱总览"}
                     </button>
                   )}
-                  {tenants.length > 1 && <select aria-label={`${u.display_name} 的租户`} value={u.tenant_id} onChange={(e) => patch(u, { tenant_id: Number(e.target.value) })}>{tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
+                  <button className="link" onClick={() => patch(u, { label_print_enabled: !u.label_print_enabled })}>
+                    {u.label_print_enabled ? "关闭标签打印" : "开通标签打印"}
+                  </button>
                   <button className="link" onClick={() => patch(u, { is_active: !u.is_active })}>{u.is_active ? "停用" : "启用"}</button>
                 </td>
               </tr>

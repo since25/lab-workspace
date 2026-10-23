@@ -38,21 +38,29 @@ try {
     { id: 1, printer_key: 'Queue A', name: '示例打印机 A', enabled: true, is_default: true, ready: true, jobs: 0 },
     { id: 2, printer_key: 'Queue B', name: '示例打印机 B', enabled: true, is_default: false, ready: false, reason: '示例设备离线', jobs: 0 },
   ];
-  let previewRequests = 0, printRequests = 0;
+  let previewRequests = 0, printRequests = 0, lastPrintBody = null;
   await page.route('**/api/v1/label-print/**', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
-    if (url.pathname.endsWith('/materials')) return route.fulfill({ json: { items, total: items.length, departments: ['示例部门'], limit: 500, fields: [{ key: 'item_name', label: '物料名称' }, { key: 'material_code', label: '物料编码' }, { key: 'spec_model', label: '规格型号' }, { key: 'brand', label: '品牌' }] } });
+    if (url.pathname.endsWith('/materials')) {
+      const page = Number(url.searchParams.get('page') || 1);
+      const pageSize = Number(url.searchParams.get('page_size') || 20);
+      const start = (page - 1) * pageSize;
+      return route.fulfill({ json: { items: items.slice(start, start + pageSize), total: items.length, page, page_size: pageSize, departments: ['示例部门'], limit: 500, fields: [{ key: 'item_name', label: '物料名称' }, { key: 'material_code', label: '物料编码' }, { key: 'spec_model', label: '规格型号' }, { key: 'brand', label: '品牌' }] } });
+    }
     if (url.pathname.endsWith('/printers')) return route.fulfill({ json: { printers } });
     if (url.pathname.endsWith('/preview')) { previewRequests += 1; const body = req.postDataJSON(); return route.fulfill({ json: { images: [sampleLabel], count: body.ids.length, media_count: 1, fields: body.fields } }); }
-    if (url.pathname.endsWith('/print')) { printRequests += 1; return route.fulfill({ json: { message: '已送出 2 张', sent: 2, printer: '示例打印机 A' } }); }
+    if (url.pathname.endsWith('/print')) { printRequests += 1; lastPrintBody = req.postDataJSON(); return route.fulfill({ json: { message: '已送出 2 张', sent: 2, printer: '示例打印机 A' } }); }
     return route.fulfill({ status: 404, json: { error: 'unexpected route' } });
   });
   await page.goto(origin);
   await page.getByText('示例耗材甲', { exact: true }).waitFor();
   await page.screenshot({ path: join(evidence, 'before-label-print.png'), fullPage: true });
+  await page.getByText('共 3 条，第 1 / 1 页').waitFor();
+  await page.getByLabel('每页').selectOption('50');
   await page.getByLabel('选择 示例耗材甲').check();
   await page.getByLabel('选择 示例耗材乙').check();
+  await page.getByLabel('份数').fill('2');
   await page.getByRole('button', { name: /预览/ }).click();
   await page.getByRole('heading', { name: '预览' }).waitFor();
   assert.equal(previewRequests, 1);
@@ -62,9 +70,11 @@ try {
   await page.getByRole('button', { name: '确认打印' }).click();
   await page.getByRole('status').filter({ hasText: '已送出 2 张' }).waitFor();
   assert.equal(printRequests, 1);
+  assert.equal(lastPrintBody?.copies, 2);
+  assert.deepEqual(lastPrintBody?.fields, ['item_name', 'material_code', 'spec_model']);
   await page.screenshot({ path: join(evidence, 'after-label-print.png'), fullPage: true });
   assert.deepEqual([], []);
-  console.log(JSON.stringify({ status: 'passed', checks: ['物料表加载', '多选物料', '字段选择与内置模板', '预览两张标签', '离线打印机不可选', '提交打印结果提示'], screenshots: evidence }));
+  console.log(JSON.stringify({ status: 'passed', checks: ['物料表加载与分页信息', '每页条数切换', '多选物料', '份数提交', '字段选择与内置模板', '预览两张标签', '离线打印机不可选', '提交打印结果提示'], screenshots: evidence }));
 } finally {
   await browser?.close();
   if (server) await new Promise((resolveServer) => server.close(resolveServer));

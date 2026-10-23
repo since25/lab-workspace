@@ -12,8 +12,7 @@ export interface SessionUser {
   role: Role;
   // 「冰箱总览」附加权限：可只读查看全部人员的冰箱内容
   freezer_view_all: boolean;
-  tenant_id: number;
-  tenant_name: string;
+  // 标签打印可见性按账号开通，与「冰箱总览」同一模型，不再经过租户门禁
   label_print_enabled: boolean;
 }
 
@@ -41,9 +40,8 @@ export function validatePassword(pw: string): string | null {
 export async function verifyLogin(username: string, password: string): Promise<SessionUser> {
   const rows = await query<SessionUser & { password_hash: string; is_active: boolean; failed_attempts: number; locked_until: Date | null }>(
     `SELECT u.id, u.username, u.display_name, u.role, u.freezer_view_all, u.password_hash, u.is_active,
-            u.failed_attempts, u.locked_until, u.tenant_id, t.name AS tenant_name,
-            t.label_print_enabled
-       FROM users u JOIN tenants t ON t.id = u.tenant_id WHERE u.username = $1 AND t.is_active`,
+            u.failed_attempts, u.locked_until, u.label_print_enabled
+       FROM users u WHERE u.username = $1`,
     [username]
   );
   const u = rows[0];
@@ -69,7 +67,7 @@ export async function verifyLogin(username: string, password: string): Promise<S
   }
   await query("UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1", [u.id]);
   return { id: u.id, username: u.username, display_name: u.display_name, role: u.role, freezer_view_all: u.freezer_view_all,
-    tenant_id: u.tenant_id, tenant_name: u.tenant_name, label_print_enabled: u.label_print_enabled };
+    label_print_enabled: u.label_print_enabled };
 }
 
 export async function createSession(userId: number) {
@@ -100,10 +98,9 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
   const rows = await query<SessionUser>(
-    `SELECT u.id, u.username, u.display_name, u.role, u.freezer_view_all, u.tenant_id,
-            t.name AS tenant_name, t.label_print_enabled
-       FROM sessions s JOIN users u ON u.id = s.user_id JOIN tenants t ON t.id = u.tenant_id
-       WHERE s.id = $1 AND s.expires_at > now() AND u.is_active AND t.is_active`,
+    `SELECT u.id, u.username, u.display_name, u.role, u.freezer_view_all, u.label_print_enabled
+       FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.id = $1 AND s.expires_at > now() AND u.is_active`,
     [tokenHash(token)]
   );
   return rows[0] ?? null;

@@ -2,7 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { query } from "@/lib/db";
 import { handle, HttpError, ok, readJson, str } from "@/lib/http";
-import { callLabelPrint, getPrintableMaterials, listPrinters, materialLabelRows, parseMaterialIds, parsePrintFields, parsePrintTemplate, requireLabelPrinting } from "@/lib/label-print";
+import { callLabelPrint, getPrintableMaterials, listPrinters, materialLabelRows, parseCopies, parseMaterialIds, parsePrintFields, parsePrintTemplate, requireLabelPrinting } from "@/lib/label-print";
 
 export const POST = handle(async (req: Request) => {
   const user = requireLabelPrinting(await requireUser());
@@ -12,6 +12,7 @@ export const POST = handle(async (req: Request) => {
   const template = parsePrintTemplate(body.template);
   const fields = parsePrintFields(body.fields);
   const ids = parseMaterialIds(body.ids);
+  const copies = parseCopies(body.copies);
   const printerId = Number(body.printer_id);
   if (!Number.isSafeInteger(printerId) || printerId <= 0) throw new HttpError(400, "请选择打印机");
   const [printer] = await listPrinters(query, true).then((rows) => rows.filter((p) => p.id === printerId && p.enabled));
@@ -20,9 +21,9 @@ export const POST = handle(async (req: Request) => {
   const rows = materialLabelRows(items, fields);
   try {
     await query(
-      `INSERT INTO label_print_jobs(request_id, tenant_id, user_id, printer_key, template, fields, row_count, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending')`,
-      [requestId, user.tenant_id, user.id, printer.printer_key, template, JSON.stringify(fields), rows.length],
+      `INSERT INTO label_print_jobs(request_id, user_id, printer_key, template, fields, row_count, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'pending')`,
+      [requestId, user.id, printer.printer_key, template, JSON.stringify(fields), rows.length],
     );
   } catch (e) {
     if ((e as { code?: string }).code === "23505") throw new HttpError(409, "这批打印请求已经提交，请勿重复操作");
@@ -33,12 +34,12 @@ export const POST = handle(async (req: Request) => {
       rows,
       layout: "two-up",
       printer_id: printer.printer_key,
-      copies: 1,
+      copies,
       operator: user.display_name,
     });
     await query("UPDATE label_print_jobs SET status='sent', result=$2, updated_at=now() WHERE request_id=$1", [requestId, JSON.stringify(result)]);
-    await audit(user.id, "label_print.sent", "label_print_job", requestId, { printer: printer.name, row_count: rows.length, fields }, req);
-    return ok({ ...result, request_id: requestId, printer: printer.name, count: rows.length });
+    await audit(user.id, "label_print.sent", "label_print_job", requestId, { printer: printer.name, row_count: rows.length, copies, fields }, req);
+    return ok({ ...result, request_id: requestId, printer: printer.name, count: rows.length, copies });
   } catch (e) {
     await query("UPDATE label_print_jobs SET status='failed', result=$2, updated_at=now() WHERE request_id=$1", [requestId, JSON.stringify({ error: e instanceof Error ? e.message : String(e) })]);
     throw e;
