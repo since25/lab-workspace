@@ -33,48 +33,45 @@ export default async function Home() {
           <strong>{a.total.toLocaleString()}</strong>
         </div>
       </div>
-      <div className="table-wrap">
-        <table>
-          <tbody>
-            <tr>
-              <td><Link href="/cells">细胞冻存</Link></td>
-              <td>
-                {s.cells} 条记录
-                {Number(s.review) > 0 && (
-                  <>
-                    ，<Link href="/cells?review=1">{s.review} 条待核对</Link>
-                  </>
-                )}
-              </td>
-            </tr>
-            <tr>
-              <td><Link href="/freezer">冰箱管理</Link></td>
-              <td>我存放的在库样品 {s.samples} 管</td>
-            </tr>
-            <tr>
-              <td><Link href="/materials">部门物料</Link></td>
-              <td>{s.materials} 条采购记录</td>
-            </tr>
-            <tr>
-              <td><Link href="/assets">固定资产</Link></td>
-              <td>{s.assets} 件研发部资产</td>
-            </tr>
-            <tr>
-              <td><Link href="/guides">我的 Guide</Link></td>
-              <td>{s.guides} 条</td>
-            </tr>
-            <tr>
-              <td><Link href="/tools/sanger">Sanger 分析</Link></td>
-              <td>上传 .ab1，按规则命名，计算编辑效率并下载结果</td>
-            </tr>
-            <tr>
-              <td><Link href="/tools/nanopore">纳米孔分析</Link></td>
-              <td>上传厂商交付包，计算各样本编辑效率</td>
-            </tr>
-          </tbody>
-        </table>
+      {/* 模块入口：按顶栏分组排列，整张卡片可点 */}
+      <h2 className="section-title">资源管理</h2>
+      <div className="module-grid">
+        <div className="module-card">
+          <Link href="/cells" className="module-name">细胞冻存</Link>
+          <span className="module-meta"><strong>{s.cells}</strong> 条记录</span>
+          {Number(s.review) > 0 && (
+            <Link href="/cells?review=1" className="module-alert">{s.review} 条待核对</Link>
+          )}
+        </div>
+        <div className="module-card">
+          <Link href="/freezer" className="module-name">冰箱管理</Link>
+          <span className="module-meta">我存放的在库样品 <strong>{s.samples}</strong> 管</span>
+        </div>
+        <div className="module-card">
+          <Link href="/materials" className="module-name">部门物料</Link>
+          <span className="module-meta"><strong>{s.materials}</strong> 条采购记录</span>
+        </div>
+        <div className="module-card">
+          <Link href="/assets" className="module-name">固定资产</Link>
+          <span className="module-meta"><strong>{s.assets}</strong> 件研发部资产</span>
+        </div>
+        <div className="module-card">
+          <Link href="/guides" className="module-name">我的 Guide</Link>
+          <span className="module-meta"><strong>{s.guides}</strong> 条</span>
+        </div>
       </div>
-      <p className="muted" style={{ marginTop: 12 }}>
+      <h2 className="section-title">分析工具</h2>
+      <div className="module-grid">
+        <div className="module-card">
+          <Link href="/tools/sanger" className="module-name">Sanger 分析</Link>
+          <span className="module-meta">上传 .ab1，按规则命名，计算编辑效率并下载结果</span>
+        </div>
+        <div className="module-card">
+          <Link href="/tools/nanopore" className="module-name">纳米孔分析</Link>
+          <span className="module-meta">上传厂商交付包，计算各样本编辑效率</span>
+        </div>
+      </div>
+      <p className="muted" style={{ marginTop: 20 }}>
         分析上传的文件只临时保存，{process.env.TEMP_JOB_TTL_HOURS || 24} 小时后自动删除，请及时下载结果。
       </p>
     </>

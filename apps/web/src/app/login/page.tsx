@@ -28,6 +28,7 @@ export default function LoginPage() {
     <div className="login">
       <div className="panel">
         <h1>实验室工作台</h1>
+        <p className="muted lead">测序分析工具与实验室资源管理</p>
         <form onSubmit={submit}>
           <label className="field">
             用户名
