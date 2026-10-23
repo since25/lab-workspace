@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>打印历史 - 标签打印</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="page-header">
+  <h1>打印历史</h1>
+  <nav><a href="/">返回录入</a></nav>
+</header>
+
+<div id="printer-status" class="status-bar status-unknown">正在查询打印机状态…</div>
+
+<main>
+  <section class="panel">
+    <div class="toolbar">
+      <label class="field">
+        搜索样品名称
+        <input type="text" id="search-input" placeholder="输入样品名称关键字">
+      </label>
+      <button id="search-btn" type="button" class="btn-secondary">搜索</button>
+    </div>
+
+    <table id="history-table" class="data-table">
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>批次</th>
+          <th>样品名称</th>
+          <th>浓度(ng/uL)</th>
+          <th>260/280</th>
+          <th>备注</th>
+          <th>份数</th>
+          <th>操作人</th>
+          <th>结果</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="history-tbody"></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='row-compare.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

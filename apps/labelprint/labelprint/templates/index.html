@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>标签打印</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="page-header">
+  <h1>标签打印</h1>
+  <nav><a href="/history">查看历史 / 重打</a></nav>
+</header>
+
+<div id="printer-status" class="status-bar status-unknown">正在查询打印机状态…</div>
+
+<main>
+
+  <section class="panel">
+    <h2>第一步：录入样品数据</h2>
+
+    <div class="toolbar">
+      <label class="field">
+        操作人
+        <input type="text" id="operator" placeholder="你的名字">
+      </label>
+      <label class="field">
+        每个样品打印份数
+        <input type="number" id="copies" value="1" min="1" step="1">
+      </label>
+    </div>
+
+    <div id="dropzone" class="dropzone">
+      将 Excel(.xls/.xlsx) 或 CSV 文件拖到这里，或
+      <label class="file-btn">
+        点击选择文件
+        <input type="file" id="file-input" accept=".xls,.xlsx,.csv" hidden>
+      </label>
+    </div>
+    <div id="parse-error" class="error-msg" hidden></div>
+
+    <table id="data-table" class="data-table">
+      <thead>
+        <tr>
+          <th>样品名称</th>
+          <th>浓度(ng/uL)</th>
+          <th>260/280</th>
+          <th>备注</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="data-tbody"></tbody>
+    </table>
+    <button id="add-row-btn" type="button" class="btn-secondary">+ 加一行</button>
+    <div id="stale-hint" class="hint-msg" hidden></div>
+
+    <div class="actions">
+      <button id="preview-btn" type="button" class="btn-primary">预览</button>
+    </div>
+  </section>
+
+  <section class="panel" id="preview-section" hidden>
+    <h2>第二步：预览并勾选要打印的标签</h2>
+    <div id="preview-error" class="error-msg" hidden></div>
+    <div class="preview-summary">将打印 <strong id="print-count">0</strong> 张</div>
+    <div id="preview-grid" class="preview-grid"></div>
+
+    <div class="actions">
+      <button id="print-btn" type="button" class="btn-primary">打印</button>
+    </div>
+    <div id="print-result" class="result-msg" hidden></div>
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='row-compare.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -30,3 +30,12 @@ apps/oa-export/output/
 
 # 本地生成的交付物与代码导读（不入库；需要长期保留时放 docs/）
 work/
+
+# 标签打印服务（Python）：本地虚拟环境、测试缓存、开发时生成的历史库与预览图
+apps/labelprint/.venv/
+apps/labelprint/data/
+apps/labelprint/preview/
+__pycache__/
+.pytest_cache/
+# 合成的测试表格（由 tests/fixtures/make_numeric_xls.py 生成，不含真实数据）
+!apps/labelprint/tests/fixtures/numeric.xls

@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>回归测试：预览过期后禁止打印</title>
+</head>
+<body>
+<!--
+  这是一个可在任意浏览器里直接跑的前端回归测试，不依赖 npm/jsdom 等额外工具链
+  （本项目此前是纯 Python 后端 + 无构建步骤的原生 JS 前端，没有任何 JS 测试设施；
+  引入一整套 npm 工具链只为了守住一个行为，对这个项目来说代价与收益不成比例——
+  尤其是 app.js 里 addRow() 用 innerHTML 拼字符串再 querySelector 找回子元素，
+  这种写法如果换成手写的最小 DOM shim 而不是真实浏览器，解析 HTML 片段这一步很
+  容易写出「看起来能跑但和真实浏览器行为不一致」的假测试——所以选择用真实浏览器
+  跑，而不是 Node + 手搓 DOM shim）。
+
+  跑法：
+    1. 在仓库根起一个静态文件服务器，例如：
+       cd /Users/wangyichuan/localissue/myserver/labelprint && python3 -m http.server 8899
+    2. 浏览器打开 http://127.0.0.1:8899/tests/frontend/print_invalidation_test.html
+    3. 看页面标题栏（会显示 "ALL PASS" 或 "N FAIL"）和页面正文里逐条的 PASS/FAIL。
+  也可以用任何支持 DOM 的浏览器自动化工具（Claude 的浏览器工具、Playwright 等）
+  打开同一个 URL 后读取 document.title 或 document.body.dataset.status
+  （值为 "pass" 或 "fail"）来做无人值守判断。
+
+  本文件直接加载生产用的 ../../labelprint/static/app.js（不是复制一份改写），
+  所以测的是真实交付代码，不是重新实现的近似版本。下面这个最小 DOM 骨架里的
+  元素 id 与 index.html 完全一致，是 app.js 的 initIndexPage() 真正会挂载
+  监听器的那些元素；history.html 相关的元素（history-tbody 等）故意不放进来，
+  这样 initHistoryPage() 就不会被触发，测试只跑首页这条链路。
+-->
+
+<div id="printer-status"></div>
+<div class="field"><input id="operator" type="text"></div>
+<input id="copies" type="number" value="1">
+<div id="dropzone">
+  <input type="file" id="file-input" hidden>
+</div>
+<div id="parse-error" hidden></div>
+
+<table>
+  <tbody id="data-tbody"></tbody>
+</table>
+<button id="add-row-btn" type="button">+ 加一行</button>
+<div id="stale-hint" hidden></div>
+
+<div class="actions">
+  <button id="preview-btn" type="button">预览</button>
+</div>
+
+<section id="preview-section" hidden>
+  <div id="preview-error" hidden></div>
+  <div>将打印 <strong id="print-count">0</strong> 张</div>
+  <div id="preview-grid"></div>
+  <button id="print-btn" type="button">打印</button>
+  <div id="print-result" hidden></div>
+</section>
+
+<h1>测试结果</h1>
+<pre id="test-output">运行中…</pre>
+
+<script>
+// ---- 在加载 app.js 之前先桩住 fetch：拦截 /api/preview、/api/print、/api/status，
+//      不需要真的起 Flask 服务。/api/print 的请求体会被记录下来，供断言检查
+//      "到底送出了什么"——这正是审查用 fetch 拦截器抓到 bug 时用的同一种手法。
+const sentPrintBodies = [];
+const ONE_PX_PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+window.fetch = async (url, opts) => {
+  opts = opts || {};
+  if (typeof url === "string" && url.indexOf("/api/preview") === 0) {
+    const body = JSON.parse(opts.body);
+    const rows = body.rows || [];
+    // 模拟真实后端在样品名过长时返回 400——用于场景 7（Important 1：
+    // 预览失败时错误提示是否真的可见）。阈值只是测试桩内部的触发标记，
+    // 不需要跟 render.py 里真实的 45 字符上限一致。
+    const tooLong = rows.find((r) => r.sample && r.sample.length > 100);
+    if (tooLong) {
+      return {
+        ok: false,
+        json: async () => ({ error: "第 1 个有效行：样品名太长，排不进标签（模拟）" }),
+      };
+    }
+    const n = rows.length;
+    return { ok: true, json: async () => ({ images: Array(n).fill(ONE_PX_PNG_B64), count: n }) };
+  }
+  if (typeof url === "string" && url.indexOf("/api/print") === 0) {
+    sentPrintBodies.push(JSON.parse(opts.body));
+    return {
+      ok: true,
+      json: async () => ({
+        batch_id: "test-batch", sent: 1, message: "已送出 1 张",
+        queue_jobs: 0, queue_backlog: false,
+      }),
+    };
+  }
+  if (typeof url === "string" && url.indexOf("/api/status") === 0) {
+    return { ok: true, json: async () => ({ ready: true, reason: "", jobs: 0, notes: "" }) };
+  }
+  throw new Error("测试桩未处理的请求：" + url);
+};
+</script>
+
+<!-- 加载真实的生产代码，不是重写的副本 -->
+<script src="../../labelprint/static/row-compare.js"></script>
+<script src="../../labelprint/static/app.js"></script>
+
+<script>
+const results = [];
+function check(name, cond, detail) {
+  results.push({ name, pass: !!cond, detail: detail || "" });
+}
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+function isPreviewVisible() {
+  const section = document.getElementById("preview-section");
+  return !!(section && !section.hidden);
+}
+
+// 清空表格、只放一行指定样品名——直接操作 DOM/调用 addRow()，不经过
+// "加一行"按钮或 fillTable()，所以这一步本身不会触发 invalidatePreview()，
+// 便于每个场景从一个"干净、待预览"的状态开始，不互相污染。
+function resetToOneRow(sample) {
+  document.getElementById("data-tbody").innerHTML = "";
+  addRow({ sample: sample });
+}
+
+async function run() {
+  // ===================================================================
+  // 场景 1-3：逐一验证三个作废触发点，每次都从"刚预览完、有效"的状态开始，
+  // 分别只做一件事，确认那一件事单独就能让预览失效——而不是靠场景 4 里
+  // 好几步叠在一起、其中只要有一步生效整体看起来就是对的（会掩盖另外两步
+  // 其实没接上作废逻辑的情况）。
+  // ===================================================================
+
+  // 场景 1：加一行
+  resetToOneRow("R1");
+  await handlePreview();
+  check("场景1 预览后可见", isPreviewVisible());
+  document.getElementById("add-row-btn").click();
+  check("场景1 点「+ 加一行」后预览被作废", !isPreviewVisible());
+
+  // 场景 2：删一行
+  resetToOneRow("R2");
+  await handlePreview();
+  check("场景2 预览后可见", isPreviewVisible());
+  document.querySelector("#data-tbody .row-del-btn").click();
+  check("场景2 删除一行后预览被作废", !isPreviewVisible());
+
+  // 场景 3：改一个单元格
+  resetToOneRow("R3");
+  await handlePreview();
+  check("场景3 预览后可见", isPreviewVisible());
+  const cell = document.querySelector("#data-tbody .cell-sample");
+  cell.value = "R3-edited";
+  cell.dispatchEvent(new Event("input", { bubbles: true }));
+  check("场景3 编辑单元格后预览被作废", !isPreviewVisible());
+
+  // ===================================================================
+  // 场景 4：完整复现审查报告里的三步——录入 Sample1 并预览，
+  // 回到表格删掉这一行、加一行 Sample2，不重新预览直接尝试打印。
+  // 断言的是"没有任何 /api/print 请求被发出"，而不只是"没有 Sample1 泄漏"——
+  // 前者是更强的保证：修复前的 bug 是"发出了带 Sample1 的请求"，
+  // 如果只断言"请求里没有 Sample1"，一个只清空 rows 但仍然发请求的
+  // 半吊子实现也能通过，掩盖了「本该完全拦住」这件事。
+  // ===================================================================
+  resetToOneRow("Sample1");
+  await handlePreview();
+  check("场景4 预览 Sample1 后可见", isPreviewVisible());
+
+  document.getElementById("add-row-btn").click(); // 加一行（此时表格有 Sample1 + 空行）
+  const rows4 = document.querySelectorAll("#data-tbody tr");
+  rows4[0].querySelector(".row-del-btn").click(); // 删掉 Sample1 那一行
+  const remaining4 = document.querySelectorAll("#data-tbody tr");
+  const remainingCell = remaining4[0].querySelector(".cell-sample");
+  remainingCell.value = "Sample2";
+  remainingCell.dispatchEvent(new Event("input", { bubbles: true }));
+
+  check("场景4 增删改之后预览仍处于作废状态", !isPreviewVisible());
+
+  const printCountBefore = sentPrintBodies.length;
+  await handlePrint(); // 直接调用底层函数，比真实用户点击更严格——
+                        // 即便按钮因为 section 被隐藏而点不到，也确认函数本身会拒绝
+  const newPrintRequests = sentPrintBodies.slice(printCountBefore);
+  check("场景4 过期预览下调用 handlePrint 不发任何 /api/print 请求",
+        newPrintRequests.length === 0,
+        "实际发出的请求：" + JSON.stringify(newPrintRequests));
+
+  // ===================================================================
+  // 场景 5：重新预览之后，应该能正常打印，且送出的是当前表格（Sample2），
+  // 不是别的什么旧数据——确认修复没有从"能作废"矫枉过正到"永久锁死打印"。
+  // ===================================================================
+  await handlePreview();
+  check("场景5 重新预览后恢复可见", isPreviewVisible());
+
+  const printCountBefore5 = sentPrintBodies.length;
+  await handlePrint();
+  const newPrintRequests5 = sentPrintBodies.slice(printCountBefore5);
+  const ok5 = newPrintRequests5.length === 1 &&
+              newPrintRequests5[0].rows.length === 1 &&
+              newPrintRequests5[0].rows[0].sample === "Sample2";
+  check("场景5 重新预览后打印，送出的确实是当前表格的 Sample2", ok5,
+        "实际发出的请求：" + JSON.stringify(newPrintRequests5));
+
+  // ===================================================================
+  // 场景 6：审查这一轮主动做的绕过探测——程序化 `.value = X` 赋值，
+  // 不触发 input 事件。事件作废机制天然覆盖不到这条路径（这正是它的设计
+  // 局限：只能穷举"哪些操作会改表格"，新交互方式随时可能漏掉一个），
+  // 但打印前重新读表格、跟 previewRows 内容比对的这道结构性防线不依赖
+  // 任何事件，应该照样能拦住。
+  // ===================================================================
+  resetToOneRow("Bypass1");
+  await handlePreview();
+  check("场景6 预览后可见", isPreviewVisible());
+
+  const bypassCell = document.querySelector("#data-tbody .cell-sample");
+  bypassCell.value = "Bypass2"; // 故意不 dispatchEvent，模拟审查的绕过手法
+  check("场景6 程序化赋值后预览区仍显示为「可见」（确认事件机制确实没被触发，"
+        + "这条路径依赖的是打印前的重新比对，不是事件作废）",
+        isPreviewVisible());
+
+  const printCountBefore6 = sentPrintBodies.length;
+  await handlePrint();
+  const newRequests6 = sentPrintBodies.slice(printCountBefore6);
+  check("场景6 打印前重新比对拦住了程序化篡改，没有发出任何 /api/print 请求",
+        newRequests6.length === 0,
+        "实际发出的请求：" + JSON.stringify(newRequests6));
+
+  // 收尾：重新预览一次，确认这道新防线同样不会把正常场景锁死
+  await handlePreview();
+  check("场景6 重新预览后恢复可见", isPreviewVisible());
+  const printCountBefore6b = sentPrintBodies.length;
+  await handlePrint();
+  const newRequests6b = sentPrintBodies.slice(printCountBefore6b);
+  const ok6b = newRequests6b.length === 1 &&
+               newRequests6b[0].rows.length === 1 &&
+               newRequests6b[0].rows[0].sample === "Bypass2";
+  check("场景6 重新预览后打印，送出的确实是当前表格的 Bypass2", ok6b,
+        "实际发出的请求：" + JSON.stringify(newRequests6b));
+
+  // ===================================================================
+  // 场景 7：Important 1（我自己上一轮上报的问题，本轮修复）——预览失败时，
+  // 仅仅让 #preview-error 自身的 hidden 属性变 false 是不够的：它嵌在
+  // #preview-section 内部，容器不可见，子元素文字再准确用户也看不到。
+  // 先显式调用 invalidatePreview() 把容器隐藏，对应"编辑表格后再次预览又
+  // 失败"这条真实路径的前置状态——如果不做这一步，容器可能因为上一个场景
+  // 残留的成功预览而已经是可见的，那样即使 bug 还在，这条断言也会误判通过。
+  // ===================================================================
+  invalidatePreview();
+  check("场景7 前置状态：预览区确实处于隐藏（不然下面的断言测不出真问题）",
+        !isPreviewVisible());
+
+  resetToOneRow("A".repeat(200)); // 桩子里 sample.length > 100 会模拟后端 400
+  await handlePreview();
+
+  const errEl = document.getElementById("preview-error");
+  check("场景7 预览失败后错误提示元素的 hidden 属性被清掉", errEl.hidden === false);
+  check("场景7 预览失败后错误提示对用户是真实可见的——用 offsetParent 判断，"
+        + "不能只看 hidden 属性或 textContent（DOM 里文字内容是对的、"
+        + "但外层容器仍隐藏，正是这个 bug 的成因，只查 textContent 会被骗过去）",
+        errEl.offsetParent !== null,
+        "offsetParent=" + String(errEl.offsetParent));
+  check("场景7 错误文案确实写进去了", errEl.textContent.indexOf("太长") !== -1);
+
+  // ===================================================================
+  // 场景 8：Important（审查发现的"孪生兄弟"）——#print-result 跟刚修的
+  // #preview-error 结构完全相同，同样嵌在 #preview-section 内部。真机上
+  // 打印机状态查询 + send_raw 走 win32 spooler 都有真实耗时，"点完打印
+  // 顺手编辑下一行数据"完全可能发生。复现审查构造的真实竞态：
+  //   1. 预览成功，点打印
+  //   2. /api/print 响应人为延迟（模拟真实打印耗时）
+  //   3. 响应回来前，编辑表格触发 input -> invalidatePreview() 把
+  //      preview-section 一起隐藏
+  //   4. 打印响应最终处理完，写结果
+  // 断言用 offsetParent 判断结果提示是否真的可见——不能只查 hidden 或
+  // textContent，场景 7 已经证明这两者在同一类 bug 存在时依然是"对的"。
+  // ===================================================================
+  resetToOneRow("RaceRow");
+  await handlePreview();
+  check("场景8 预览后可见", isPreviewVisible());
+
+  let releasePrintResponse;
+  const delayedPrintGate = new Promise((resolve) => { releasePrintResponse = resolve; });
+  const fetchBeforeRace = window.fetch; // 此刻的桩子（顶部定义的那一份），下面临时包一层延迟
+  window.fetch = async (url, opts) => {
+    if (typeof url === "string" && url.indexOf("/api/print") === 0) {
+      await delayedPrintGate; // 卡住，直到测试代码手动放行，模拟真实耗时
+    }
+    return fetchBeforeRace(url, opts);
+  };
+
+  const printPromise = handlePrint(); // 故意不 await，模拟响应还没回来
+  await sleep(30); // 让 handlePrint 先跑到 await fetch(...) 那一步、真正挂起
+
+  // 响应还没回来时，编辑表格——对应真机上"点完打印顺手改下一行"
+  const raceCell = document.querySelector("#data-tbody .cell-sample");
+  raceCell.value = "RaceRowEdited";
+  raceCell.dispatchEvent(new Event("input", { bubbles: true }));
+  check("场景8 打印响应还没回来时，编辑表格已经把预览区重新隐藏",
+        !isPreviewVisible());
+
+  releasePrintResponse(); // 放行，让 /api/print 的桩子真正 resolve
+  await printPromise; // 等 handlePrint 把响应处理完
+  window.fetch = fetchBeforeRace; // 恢复，不影响后续（虽然场景 8 是最后一个）
+
+  const raceResultEl = document.getElementById("print-result");
+  check("场景8 竞态之后，打印结果提示对用户是真实可见的——offsetParent 判定，"
+        + "不能只查 hidden 或 textContent",
+        raceResultEl.offsetParent !== null,
+        "offsetParent=" + String(raceResultEl.offsetParent) +
+        "，hidden=" + raceResultEl.hidden + "，text=" + raceResultEl.textContent);
+
+  // ===================================================================
+  // 场景 9：最终整支审查 C5——双击「打印」按钮只应该发出一个 /api/print
+  // 请求。审查已实测：修复前不禁用按钮时，真实双击会发出两个请求，把同
+  // 一批标签打印两遍。这里必须用真实的 .click() 连续点两次，不能像前面
+  // 几个场景那样直接调 handlePrint() 两次——修复依赖的是浏览器对
+  // disabled 按钮的原生点击抑制，只有走 click() 这条路径才能测出这层
+  // 保护是否真的接上了；直接调函数会绕过按钮的 disabled 状态检查，测不
+  // 出这个修复本身有没有生效。
+  // ===================================================================
+  resetToOneRow("DoubleClick1");
+  await handlePreview();
+  check("场景9 预览后可见", isPreviewVisible());
+
+  const printBtn = document.getElementById("print-btn");
+  check("场景9 前置状态：打印按钮当前未被禁用", !printBtn.disabled);
+
+  const printCountBefore9 = sentPrintBodies.length;
+  printBtn.click();
+  printBtn.click(); // 紧接着再点一次，模拟真实双击
+  check("场景9 第一次点击后按钮立刻被禁用（此时请求还没返回）", printBtn.disabled);
+
+  await sleep(30); // 等（应该只有一个的）/api/print 请求处理完
+  const newRequests9 = sentPrintBodies.slice(printCountBefore9);
+  check("场景9 双击「打印」只发出了一个 /api/print 请求，不是两个",
+        newRequests9.length === 1,
+        "实际发出的请求数：" + newRequests9.length);
+  check("场景9 请求处理完之后按钮恢复可用（不会被永久锁死）", !printBtn.disabled);
+
+  // ===================================================================
+  // 场景 10：最终整支审查 C8.3——一次要打印超过 100 张时二次确认；取消
+  // 则不发送任何请求，确认后正常发送。
+  // ===================================================================
+  resetToOneRow("BigBatch");
+  await handlePreview();
+  check("场景10 预览后可见", isPreviewVisible());
+  document.getElementById("copies").value = "150"; // 1 行 * 150 份 = 150 张，超过 100
+
+  let confirmCalledWith = null;
+  const originalConfirm = window.confirm;
+
+  window.confirm = (msg) => { confirmCalledWith = msg; return false; }; // 模拟用户点「取消」
+  const printCountBefore10a = sentPrintBodies.length;
+  await handlePrint();
+  const newRequests10a = sentPrintBodies.slice(printCountBefore10a);
+  check("场景10 超过100张时会弹出二次确认，文案里带着张数",
+        confirmCalledWith !== null && confirmCalledWith.indexOf("150") !== -1,
+        "confirm 收到的文案：" + confirmCalledWith);
+  check("场景10 取消确认后不发送任何 /api/print 请求", newRequests10a.length === 0,
+        "实际发出的请求：" + JSON.stringify(newRequests10a));
+
+  confirmCalledWith = null;
+  window.confirm = (msg) => { confirmCalledWith = msg; return true; }; // 模拟用户点「确定」
+  const printCountBefore10b = sentPrintBodies.length;
+  await handlePrint();
+  const newRequests10b = sentPrintBodies.slice(printCountBefore10b);
+  check("场景10 确认后正常发送 /api/print 请求，份数与表格一致（150）",
+        newRequests10b.length === 1 && newRequests10b[0].copies === 150,
+        "实际发出的请求：" + JSON.stringify(newRequests10b));
+
+  window.confirm = originalConfirm;
+  document.getElementById("copies").value = "1"; // 恢复默认值
+
+  // ---------------- 汇总输出 ----------------
+  const allPass = results.every((r) => r.pass);
+  const lines = results.map((r) =>
+    (r.pass ? "PASS  " : "FAIL  ") + r.name + (r.pass ? "" : "\n      " + r.detail));
+  document.getElementById("test-output").textContent =
+    lines.join("\n") + "\n\n" + (allPass ? "全部通过" : "存在失败项") +
+    "（" + results.filter((r) => r.pass).length + "/" + results.length + "）";
+  document.title = (allPass ? "ALL PASS" : (results.length - results.filter(r=>r.pass).length) + " FAIL") +
+    " - print_invalidation_test";
+  document.body.dataset.status = allPass ? "pass" : "fail";
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  // app.js 自己的 DOMContentLoaded 监听器是在它的 <script> 标签里注册的，
+  // 该标签在文档顺序上排在本脚本之前，同一事件的监听器按注册顺序触发，
+  // 所以理论上不需要额外等待；这里仍然让出一次事件循环，纯粹是防御性的，
+  // 不依赖"谁先注册"这个隐含前提也能稳定跑。
+  setTimeout(run, 50);
+});
+</script>
+</body>
+</html>

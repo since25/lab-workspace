@@ -1,0 +1,280 @@
+/* 标签打印网页样式。保持朴素，不做花哨效果。 */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 20px 40px;
+  font-family: -apple-system, "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  color: #1f2328;
+  background: #f6f7f8;
+}
+
+.page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 16px 4px 8px;
+}
+
+.page-header h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.page-header nav a {
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.page-header nav a:hover {
+  text-decoration: underline;
+}
+
+/* 打印机状态条：常驻在页面顶部 */
+.status-bar {
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.status-unknown {
+  background: #eceff1;
+  color: #555;
+}
+
+.status-ok {
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+
+.status-warn {
+  background: #fff4e5;
+  color: #9a5b00;
+}
+
+.status-error {
+  background: #fdeaea;
+  color: #b91c1c;
+  font-weight: bold;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e2e5e9;
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.panel h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  color: #444;
+  gap: 4px;
+}
+
+.field input {
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.dropzone {
+  border: 1px dashed #b0b7c0;
+  border-radius: 6px;
+  padding: 18px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.dropzone.drag-over {
+  border-color: #2563eb;
+  background: #f0f5ff;
+}
+
+.file-btn {
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.error-msg {
+  color: #b91c1c;
+  background: #fdeaea;
+  border: 1px solid #f5c2c2;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+/* 表格改动后旧预览作废时的提示：橙色警示，比 .error-msg 温和——
+   不是操作出了错，只是提醒"这不是最新的了" */
+.hint-msg {
+  color: #9a5b00;
+  background: #fff4e5;
+  border: 1px solid #ffd699;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  font-weight: bold;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  border: 1px solid #e2e5e9;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.data-table th {
+  background: #f5f6f8;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.data-table td input[type="text"] {
+  width: 100%;
+  border: 1px solid transparent;
+  padding: 4px 6px;
+  font-size: 14px;
+  border-radius: 3px;
+}
+
+.data-table td input[type="text"]:focus {
+  border-color: #93b4f5;
+  outline: none;
+  background: #f8faff;
+}
+
+tr.row-failed td {
+  color: #b91c1c;
+}
+
+button {
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  padding: 6px 14px;
+  background: #fff;
+}
+
+.btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #1d4fd1;
+}
+
+.btn-secondary:hover {
+  background: #f0f1f3;
+}
+
+.row-del-btn,
+.reprint-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+.actions {
+  margin: 14px 0;
+}
+
+.preview-summary {
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.preview-card {
+  border: 1px solid #e2e5e9;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fafbfc;
+  text-align: center;
+}
+
+/* 标签原图 703x178，这里只限制不超过原始像素尺寸，避免放大发虚；
+   真正显示宽度由卡片（网格列）决定，宽高比始终保持不变 */
+.preview-card img {
+  max-width: 703px;
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid #ddd;
+  background: #fff;
+  margin-bottom: 6px;
+}
+
+.preview-card label {
+  font-size: 13px;
+  color: #444;
+}
+
+.result-msg {
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.result-ok {
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+
+.result-warn {
+  background: #fff4e5;
+  color: #9a5b00;
+  font-weight: bold;
+}
+
+.result-error {
+  background: #fdeaea;
+  color: #b91c1c;
+  font-weight: bold;
+}

@@ -33,6 +33,7 @@
 | 外部系统 | V1 不对接 Hub、Grist、eLabFTW、webhook |
 | 原始数据 | 不进入 Git，不进入生产数据库 |
 | 分析失败原因 | 「厂商交付文件损坏/截断」与「目标位真的没有覆盖」分开记录，前者算数据瑕疵（要求重发），不写成「读不出」这类无法定位的原因 |
+| 标签打印工程化 | 选 B「同仓库、双进程」：标签服务（Python/Flask + PIL + pywin32）并入 `apps/labelprint/`，与工作台同一个安装包、一次安装、一个 `VERSION`、一份 `app.zip` 回滚；Python 3.13.15 嵌入版与锁定版本的依赖随安装包分发。不改写为全 Node（C）。理由见下（2026-10-23，TASK-94） |
 
 ## 部署改定说明（2026-10-12）
 
@@ -42,3 +43,38 @@
 - windows-wg 为 Windows 10 LTSC 2019（内部版本 17763），不支持 WSL2，无法运行 Docker Desktop；内存 8 GB，且已承载标签打印服务和 MariaDB。
 
 因此改为在 windows-wg 上原生安装 Node.js、PostgreSQL 16、R，按开机自启服务运行。`infra/docker-compose.yml` 不再作为生产部署方式，仅可选用于开发机本地起数据库。资源约束：Nanopore 单任务大小和并发需设上限，临时工作区放在空间充足的 E: 盘。
+
+## 标签打印统一工程化：选 B 同仓库双进程（2026-10-23，TASK-94）
+
+### 背景
+
+工作台（`apps/web`，Node/Next）负责页面、字段/模板、`label_printers`、`label_print_jobs` 和 `/api/v1/label-print/*` 代理；标签服务原是独立仓库 `myserver/labelprint`（Python/Flask），负责 PIL 渲染、TSPL 拼装、win32print RAW 提交、纸张构型和自有 SQLite 历史，由计划任务 `LabelPrintService` 用机器上的系统 Python 跑在 `127.0.0.1:8080`。两者只靠 HTTP 连接，却各有一套部署、两个版本、标签仓库没有远端。TASK-87 一天之内两边各部署了 6 次，每次都要分别备份、覆盖、重装，版本只有工作台有戳。
+
+### 候选
+
+| 标准（按长期维护权重） | B 同仓库、双进程（保留 Python） | C 全部 Node |
+|---|---|---|
+| 1. 部署与回滚收敛成一次 | 能：一个 `app.zip` 同时含网页、分析服务、标签服务；一次 `install.ps1`；回滚恢复一份 `app.zip` | 能 |
+| 2. 运行时与跨平台打包 | Python 官方嵌入版是 zip，依赖用 `pip --platform win_amd64 --only-binary` 在 macOS 上直接取 Windows 二进制包，与现有「开发机下载运行环境、目标机离线安装」做法一致；多一个运行时（约 70 MB） | 单一运行时，但 CJK 文本度量要么引入 node-canvas 等原生模块（macOS 上跨平台打给 Windows 原生模块是最难控的一环），要么自写度量；Win32 打印仍要 PowerShell P/Invoke 或 FFI |
+| 3. 已校准能力的复用与重写风险 | 零重写：换行、居中、边距、双列、三套模板、TSPL、RAW 提交原样沿用，依赖版本锁定为线上同版本（Pillow 12.3.0、pywin32 312），渲染逐像素一致 | 全部重写并重新实物校准；同一字体换渲染引擎，字形度量会变，2026-10-23 刚调好的排版要再来一轮 |
+| 4. 测试与排障 | 两门语言两套测试（pytest + vitest），但同一提交、同一版本号、同一日志目录、同一安装日志；`/api/status` 带版本号，安装脚本核对两端一致 | 单一测试栈，但打印链路问题要在 Node↔PowerShell↔winspool 之间排查 |
+| 5. 后续扩展 | POSTEK EPL 后端（TASK-91）、多打印机都是标签服务内部的输出后端，在 Python 侧加；模板编辑器（TASK-90）的界面在工作台、渲染仍走服务预览 | 都要在新写的 JS 渲染上做 |
+| 6. 理解与接手 | 两门语言，但边界清楚：工作台管「谁、打什么」，标签服务管「怎么画、怎么出纸」 | 一门语言，但打印部分是 Win32 互操作，并不更容易接手 |
+
+### 结论
+
+选 **B**。它直接消掉真正疼的问题（两套部署、两个版本、标签仓库无远端），而 C 的唯一收益「单一运行时」要用重写并重新实物验证整条渲染与打印链路来换，且仍绕不开本机 Win32 调用。B 的短板「机器上需要 Python」通过把嵌入版 Python 与锁定依赖纳入安装包补上：机器重建后照常一次安装即可起服务，不依赖另装的系统 Python。
+
+### 落地方式
+
+- 代码：独立仓库 `labelprint` 分支 `task-87` 提交 `1cc4c5a`（即当时线上运行版本）的文件拷入 `apps/labelprint/`；只拷当前文件、不导入其 Git 历史（该仓库无远端，历史里有现场调试记录），原仓库在开发机保留作档案。
+- 安装：`build-bundle.sh` 把标签服务打进 `app.zip` 的 `labelprint\`，`runtime\` 增加 `python-3.13.15-embed-amd64.zip` 与 `python-packages-<清单摘要>.zip`；`install.ps1` 停三个服务、备份标签历史库、替换 `app\`、装 Python 与依赖、注册 `LabWorkspace-LabelPrint`（取代并删除旧任务 `LabelPrintService`，取消 72 小时运行上限），最后核对网页健康与标签服务版本号。
+- 数据：打印历史库留在 `C:\labelprint\data\labelprint.db`，路径不变；每次安装前自动复制到 `E:\lab-workspace\backups\labelprint_<时间>.db`。
+- 版本：`app\VERSION` 一份，标签服务 `/api/status` 返回同一个 `version`。
+
+### 不做的部分
+
+- 不改写为 Node，不动渲染与打印逻辑。
+- 不合并两份打印机配置（工作台 `label_printers` 管显示名与启停，标签服务 `LABELPRINT_PRINTERS_JSON` 管队列名，`id`/`printer_key` 对应），也不合并两份历史（工作台 `label_print_jobs` 记「谁打了哪些记录」，标签服务 SQLite 记「送出了哪些位图」）；需要时另立任务。
+- 不删除旧目录 `C:\labelprint`（旧代码留作应急恢复，`data\` 继续使用），不改旧防火墙规则 `LabelPrint-In-TCP-8080`（服务只监听本机，该规则不起作用）。
+- 不把标签历史库纳入每日 `pg_dump` 备份，只在每次安装前备份。

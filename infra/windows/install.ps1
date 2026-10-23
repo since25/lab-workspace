@@ -3,9 +3,11 @@
 # 前提：已把安装包解压到 C:\lab-workspace\incoming\（含 app.zip、runtime\ 目录），
 #       本脚本位于 C:\lab-workspace\incoming\deploy\。
 # 做的事：装运行环境（Node / PostgreSQL / R 及 R 包，全部用本地文件，不依赖外网）→
-#         初始化数据库（仅首次）→ 更新应用文件 → 执行数据库迁移 → 注册开机自启任务 →
-#         防火墙放行 3000 → 启动并做健康检查。
-# 不做的事：不动标签打印服务（8080）、MariaDB（3306）及其防火墙规则。
+#         初始化数据库（仅首次）→ 停止网页、分析、标签打印三个服务 → 备份标签打印历史库 →
+#         更新应用文件（一个 app.zip 同时含网页、分析服务与标签打印服务）→ 装 Python 运行时与依赖 →
+#         执行数据库迁移 → 注册开机自启任务 → 防火墙放行 3000 → 启动并做健康检查（两端版本号一致）。
+# 不做的事：不动 MariaDB（3306）；不删旧标签服务目录 C:\labelprint（data\ 历史库仍在原处，旧代码留作应急恢复），
+#           不改其防火墙规则 LabelPrint-In-TCP-8080（服务只监听本机，该规则不起作用）。
 $ErrorActionPreference = 'Stop'
 
 $Root     = 'C:\lab-workspace'
@@ -21,6 +23,8 @@ $PgSvc    = 'lab-workspace-postgresql'
 $WebPort  = 3000
 $RPort    = 8001
 $PgPort   = 5432
+$LpPort   = 8080
+$LpData   = 'C:\labelprint\data'
 
 function Step($m) { "[$(Get-Date -f 'HH:mm:ss')] $m" }
 function NewSecret([int]$n) {
@@ -146,17 +150,52 @@ Remove-Item Env:\PGPASSWORD
 
 # ---------- 4. 应用文件 ----------
 Step '停止旧进程并更新应用文件'
-foreach ($t in @('LabWorkspace-Web', 'LabWorkspace-R')) {
+foreach ($t in @('LabWorkspace-Web', 'LabWorkspace-R', 'LabWorkspace-LabelPrint', 'LabelPrintService')) {
   & { $ErrorActionPreference = 'SilentlyContinue'; schtasks /End /TN $t 2>$null } | Out-Null
 }
+# LabelPrintService 是并入本仓库前的独立标签服务任务（C:\labelprint\deploy\daemon.ps1 + 系统 Python），
+# 由 LabWorkspace-LabelPrint 取代；删掉它，避免开机时两个服务抢 8080。
+& { $ErrorActionPreference = 'SilentlyContinue'; schtasks /Delete /TN 'LabelPrintService' /F 2>$null } | Out-Null
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-  Where-Object { $_.ExecutablePath -like "$Root\*" -and $_.Name -in @('node.exe', 'Rscript.exe', 'Rterm.exe') -or ($_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*lab-workspace\deploy\run-*') } |
+  Where-Object { $_.ExecutablePath -like "$Root\*" -and $_.Name -in @('node.exe', 'Rscript.exe', 'Rterm.exe', 'python.exe') -or
+    ($_.Name -eq 'python.exe' -and $_.CommandLine -like '*labelprint.app*') -or
+    ($_.Name -eq 'powershell.exe' -and ($_.CommandLine -like '*lab-workspace\deploy\run-*' -or $_.CommandLine -like '*labelprint\deploy\daemon.ps1*')) } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
+if (Get-NetTCPConnection -LocalPort $LpPort -State Listen -ErrorAction SilentlyContinue) { throw "端口 $LpPort 仍被占用，旧标签打印服务未能停止" }
+
+# 标签打印历史库在代码目录之外，升级不会动它；仍在每次安装前留一份副本（服务已停，文件一致）
+if (Test-Path "$LpData\labelprint.db") {
+  $lpBak = Join-Path $Backups ("labelprint_{0}.db" -f (Get-Date -f 'yyyyMMdd_HHmm'))
+  Copy-Item "$LpData\labelprint.db" $lpBak -Force
+  Step "已备份标签打印历史库：$lpBak"
+}
 if (Test-Path "$Root\app") { Remove-Item "$Root\app" -Recurse -Force }
 Expand-Archive "$Incoming\app.zip" -DestinationPath "$Root\app" -Force
 New-Item -ItemType Directory -Force -Path "$Root\deploy" | Out-Null
 Copy-Item "$Incoming\deploy\*.ps1" "$Root\deploy\" -Force
+
+# Python 嵌入版（官方 zip，解压即用，不写注册表，不影响本机已装的系统 Python）与标签服务依赖
+if (-not (Test-Path "$Root\python\python.exe")) {
+  Step '解压 Python 嵌入版'
+  $zip = Get-ChildItem "$Runtime\python-*-embed-amd64.zip" | Select-Object -First 1
+  if (-not $zip) { throw "缺少 $Runtime\python-*-embed-amd64.zip，请把安装包的 runtime\ 一并拷来" }
+  Expand-Archive $zip.FullName -DestinationPath "$Root\python" -Force
+}
+# ._pth 决定嵌入版的全部搜索路径：开启 site（处理 pywin32.pth）并加入 app\labelprint，使 python -m labelprint.* 可用
+$pth = Get-ChildItem "$Root\python\python3*._pth" | Select-Object -First 1
+Set-Content -Path $pth.FullName -Encoding ASCII -Value @("$($pth.BaseName).zip", '.', 'Lib\site-packages', '..\app\labelprint', 'import site')
+$pkgZip = Get-ChildItem "$Runtime\python-packages-*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $pkgZip) { throw "缺少 $Runtime\python-packages-*.zip，请把安装包的 runtime\ 一并拷来" }
+$pkgMark = "$Root\python\packages.txt"
+if (-not (Test-Path $pkgMark) -or (Get-Content $pkgMark -Raw).Trim() -ne $pkgZip.Name) {
+  Step "安装标签服务依赖 $($pkgZip.Name)"
+  if (Test-Path "$Root\python\Lib\site-packages") { Remove-Item "$Root\python\Lib\site-packages" -Recurse -Force }
+  Expand-Archive $pkgZip.FullName -DestinationPath "$Root\python\Lib\site-packages" -Force
+  Set-Content -Path $pkgMark -Value $pkgZip.Name -Encoding ASCII
+}
+# 参数里不能带双引号：PowerShell 5.1 传给外部程序时会把它吞掉
+Run "$Root\python\python.exe" @('-c', 'import sys, flask, PIL, win32print; print(sys.version.split()[0], PIL.__version__)')
 
 Step '执行数据库迁移'
 $env:DATABASE_URL = $cfg.DATABASE_URL
@@ -169,14 +208,23 @@ Step '注册计划任务'
 $ps = 'powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File'
 schtasks /Create /TN 'LabWorkspace-R'   /SC ONSTART /RU SYSTEM /RL HIGHEST /F /TR "$ps $Root\deploy\run-r.ps1" | Out-Null
 schtasks /Create /TN 'LabWorkspace-Web' /SC ONSTART /RU SYSTEM /RL HIGHEST /F /TR "$ps $Root\deploy\run-web.ps1" | Out-Null
+schtasks /Create /TN 'LabWorkspace-LabelPrint' /SC ONSTART /RU SYSTEM /RL HIGHEST /F /TR "$ps $Root\deploy\run-labelprint.ps1" | Out-Null
 # 常驻服务取消计划任务默认的 72 小时运行上限，避免连同守护循环一起被终止。
-foreach ($t in @('LabWorkspace-R', 'LabWorkspace-Web')) {
+foreach ($t in @('LabWorkspace-R', 'LabWorkspace-Web', 'LabWorkspace-LabelPrint')) {
   $task = Get-ScheduledTask -TaskName $t
   $task.Settings.ExecutionTimeLimit = 'PT0S'
   Set-ScheduledTask -TaskName $t -Settings $task.Settings | Out-Null
   if ((Get-ScheduledTask -TaskName $t).Settings.ExecutionTimeLimit -ne 'PT0S') { throw "计划任务 $t 未取消运行时限" }
 }
 schtasks /Create /TN 'LabWorkspace-Backup' /SC DAILY /ST 02:30 /RU SYSTEM /RL HIGHEST /F /TR "$ps $Root\deploy\backup.ps1" | Out-Null
+
+# 公用桌面「标签打印 - 自检」快捷方式改指向新位置（不会打出实物标签）
+$wsh = New-Object -ComObject WScript.Shell
+$sc = $wsh.CreateShortcut("$env:PUBLIC\Desktop\标签打印 - 自检.lnk")
+$sc.TargetPath = "$Root\app\labelprint\verify.bat"
+$sc.WorkingDirectory = "$Root\app\labelprint"
+$sc.Description = '双击自检标签打印服务是否正常（不会打出实物标签）'
+$sc.Save()
 
 # ---------- 6. 防火墙：只放行 Web 端口给单位内网与 WireGuard 内网 ----------
 $rule = 'LabWorkspace-Web-In-TCP-3000'
@@ -194,6 +242,7 @@ if (Get-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue) {
 Step '启动服务'
 schtasks /Run /TN 'LabWorkspace-R' | Out-Null
 schtasks /Run /TN 'LabWorkspace-Web' | Out-Null
+schtasks /Run /TN 'LabWorkspace-LabelPrint' | Out-Null
 $ok = $false
 for ($i = 0; $i -lt 60; $i++) {
   Start-Sleep -Seconds 2
@@ -203,4 +252,15 @@ for ($i = 0; $i -lt 60; $i++) {
   } catch {}
 }
 if (-not $ok) { throw "健康检查未通过，请查看 $Logs\web.log 与 $Logs\r-engine.log" }
-Step "安装完成：http://<本机地址>:$WebPort  （数据库、分析服务均正常）"
+Step '网页服务已启动（数据库、分析服务均正常）'
+# 标签服务只要接口应答且版本号与 app\VERSION 一致即算启动成功；打印机是否就绪（没开机、缺纸）只提示不阻断
+$version = (Get-Content "$Root\app\VERSION" -Raw).Trim()
+$lp = $null
+for ($i = 0; $i -lt 30; $i++) {
+  Start-Sleep -Seconds 2
+  try { $lp = Invoke-RestMethod -UseBasicParsing -TimeoutSec 5 "http://127.0.0.1:$LpPort/api/status"; if ($lp.version -eq $version) { break } } catch {}
+}
+if (-not $lp -or $lp.version -ne $version) { throw "标签打印服务未启动或版本不一致（期望 $version，实际 $($lp.version)），请查看 $Logs\labelprint.log" }
+$printerState = if ($lp.ready) { '打印机就绪' } else { "打印机未就绪：$($lp.reason)" }
+Step "标签打印服务已启动（版本 $version，$printerState）"
+Step "安装完成：http://<本机地址>:$WebPort  （网页、分析服务、标签打印服务版本均为 $version）"

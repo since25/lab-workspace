@@ -33,9 +33,10 @@ V1 功能已开发完成：登录与账号管理、细胞冻存库、冰箱管�
 - `docs/consumable-stock.md`：常用耗材库存的类别配置、状态口径、API 与核对流程
 - `docs/material-inventory-research.md`：采购周期取数方法、访谈提纲与开源库存项目评估
 - `docs/agent-mcp.md`：用 MCP agent 查询采购/库存并提交待审批的库存校对请求
-- `docs/label-print.md`：标签打印的来源、纸张与模板字号、打印流程与设备登记
+- `docs/label-print.md`：标签打印的来源、纸张与模板字号、打印流程、设备登记与部署/版本/回滚
 - `apps/web/`：网页与 API（Next.js）
 - `apps/r-engine/`：分析服务（R plumber，算法来自 EditR_wang）
+- `apps/labelprint/`：标签打印服务（Python/Flask，PIL 渲染 + TSPL + win32print 出纸，仅本机 8080，由网页服务代理；与网页同一安装包和版本号）
 - `apps/mcp-server/`：给 agent 用的 MCP stdio 服务（检索采购/库存、提交库存校对请求）
 - `examples/`：完全脱敏的导入示例，禁止放入实验室原始表格
 - `infra/windows/`：安装包生成与 windows-wg 安装、守护、备份、卸载脚本；`infra/docker-compose.yml` 仅可选用于本地开发数据库
@@ -46,6 +47,7 @@ V1 功能已开发完成：登录与账号管理、细胞冻存库、冰箱管�
 - Web/API：Next.js + TypeScript
 - 数据库：PostgreSQL 16
 - 分析服务：R + plumber（从 EditR_wang 选择性迁移算法）
+- 标签打印：Python 3.13 嵌入版 + Flask + Pillow + pywin32（随安装包分发）
 - 临时文件：本机临时工作区，按 TTL 清理
 - 部署：windows-wg（Windows 10 LTSC 2019）原生安装，不使用 Docker
 

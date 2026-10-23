@@ -6,18 +6,19 @@
 |---|---|---|---|
 | 网页（Next.js 独立构建） | `C:\lab-workspace\app\web` | 计划任务 `LabWorkspace-Web`，开机以 SYSTEM 启动 `deploy\run-web.ps1` 守护循环 | 3000（对外） |
 | 分析服务（R plumber） | `C:\lab-workspace\app\r-engine` | 计划任务 `LabWorkspace-R`，`deploy\run-r.ps1` 守护循环 | 8001（仅本机） |
+| 标签打印服务（Python/Flask） | `C:\lab-workspace\app\labelprint`，历史库 `C:\labelprint\data\labelprint.db` | 计划任务 `LabWorkspace-LabelPrint`，`deploy\run-labelprint.ps1` 守护循环 | 8080（仅本机） |
 | 数据库 PostgreSQL 16 | 程序 `C:\lab-workspace\pgsql`，数据 `E:\lab-workspace\pgdata` | Windows 服务 `lab-workspace-postgresql`（Network Service） | 5432（仅本机） |
-| 运行环境 | `C:\lab-workspace\node`、`C:\lab-workspace\R` | — | — |
+| 运行环境 | `C:\lab-workspace\node`、`C:\lab-workspace\R`、`C:\lab-workspace\python`（嵌入版） | — | — |
 | 配置 | `C:\lab-workspace\config\lab.env`（仅 SYSTEM 与管理员可读） | — | — |
 | 分析临时文件 | `E:\lab-workspace\jobs`，24 小时后自动删除 | — | — |
-| 日志 | `E:\lab-workspace\logs\web.log`、`r-engine.log`、`backup.log`；数据库日志在 `pgdata\log` | — | — |
+| 日志 | `E:\lab-workspace\logs\web.log`、`r-engine.log`、`labelprint.log`、`backup.log`；数据库日志在 `pgdata\log` | — | — |
 | 备份 | `E:\lab-workspace\backups`，每天 02:30，保留 30 天 | 计划任务 `LabWorkspace-Backup` | — |
 
 防火墙规则 `LabWorkspace-Web-In-TCP-3000` 只放行单位内网 `10.129.0.0/16` 与 WireGuard 内网 `192.168.7.0/24`。如同事电脑不在这两个网段，需要在该规则里补充来源。
 
-本系统不占用同机的标签打印服务端口 8080 与 MariaDB（3306）。TASK-87 起，标签打印服务改为仅监听 `127.0.0.1:8080`，工作台通过 `LABELPRINT_URL=http://127.0.0.1:8080` 服务端代理调用；浏览器不得直接访问 8080。
+本系统不占用同机的 MariaDB（3306）。标签打印服务仅监听 `127.0.0.1:8080`，工作台通过 `LABELPRINT_URL=http://127.0.0.1:8080` 服务端代理调用；浏览器不得直接访问 8080。2026-10-23（TASK-94）起标签打印服务并入本仓库与本安装包，同一次安装、同一个版本号，部署与回滚见 [`label-print.md`](label-print.md) 第 6 节。
 
-标签服务可通过 `LABELPRINT_PRINTERS_JSON` 配置多台 Windows 打印队列，例如 `[{"id":"brady-a","name":"Brady A","printer_name":"Brady A"}]`。工作台管理员页面维护同名 `printer_key`，停用设备后工作台不会再允许提交。
+标签服务可通过 `lab.env` 的 `LABELPRINT_PRINTERS_JSON` 配置多台 Windows 打印队列，例如 `[{"id":"brady-a","name":"Brady A","printer_name":"Brady A"}]`。工作台管理员页面维护同名 `printer_key`，停用设备后工作台不会再允许提交。
 
 ### 常用耗材类别配置（可选）
 
@@ -31,7 +32,7 @@ agent 用的 MCP 服务不部署在 windows-wg，而由使用 agent 的电脑以
 bash infra/windows/build-bundle.sh
 ```
 
-输出 `dist/bundle/`：`app.zip`（应用）、`deploy/`（脚本）、`runtime/`（Node、PostgreSQL、R 安装文件与 R 包离线仓库）。该机国际下载不稳定，所有运行环境都在开发机下载后拷过去，安装过程不访问外网。
+输出 `dist/bundle/`：`app.zip`（应用，含网页、分析服务与标签打印服务）、`deploy/`（脚本）、`runtime/`（Node、PostgreSQL、R 安装文件与 R 包离线仓库，Python 嵌入版与标签服务依赖包）。该机国际下载不稳定，所有运行环境都在开发机下载后拷过去，安装过程不访问外网。
 
 ## 3. 首次安装
 
@@ -51,12 +52,12 @@ bash infra/windows/build-bundle.sh
 
 ## 4. 升级
 
-开发机重新执行 `build-bundle.sh`，只需把新的 `app.zip` 与 `deploy/` 覆盖到 `C:\lab-workspace\incoming\`，再执行一次 `install.ps1`。脚本会停旧进程、替换 `app\`、执行新的数据库迁移并重启；运行环境、配置与数据不受影响。
+开发机重新执行 `build-bundle.sh`，只需把新的 `app.zip` 与 `deploy/` 覆盖到 `C:\lab-workspace\incoming\`，再执行一次 `install.ps1`。脚本会停旧进程（含标签打印服务）、备份标签历史库、替换 `app\`、执行新的数据库迁移并重启；运行环境、配置与数据不受影响。`runtime\` 中 Python 的两个 zip 只在首次或标签服务依赖变化时需要补拷。安装日志末尾应依次出现「网页服务已启动」与「标签打印服务已启动（版本 xxx）」。
 
 ## 5. 日常检查
 
 - 网页与分析服务为常驻任务，`ExecutionTimeLimit` 必须为 `PT0S`（无限）；Windows 默认的 `PT72H` 会在三天后连同守护循环一起终止。安装脚本在注册这两个任务后显式取消时限；备份与 OA 同步任务保持各自原有时限。
-- 健康检查：`http://<地址>:3000/api/v1/health` 返回 `{"status":"ok","db":true,"r_engine":true}`。
+- 健康检查：`http://<地址>:3000/api/v1/health` 返回 `{"status":"ok","db":true,"r_engine":true}`；标签服务在本机 `http://127.0.0.1:8080/api/status`，`version` 应与 `C:\lab-workspace\app\VERSION` 相同。
 - 服务状态：`schtasks /Query /TN LabWorkspace-Web`、`Get-Service lab-workspace-postgresql`。
 - 手动重启网页或分析服务：`schtasks /End /TN LabWorkspace-Web` 后 `schtasks /Run /TN LabWorkspace-Web`（R 同理）。
 

@@ -1,0 +1,6 @@
+Flask
+Pillow
+openpyxl
+xlrd
+pywin32; sys_platform == "win32"
+pytest  # 供 verify.bat/selfcheck.py 的"自动化测试套件"一项调用，不是 Flask 运行时依赖
