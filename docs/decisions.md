@@ -67,7 +67,7 @@
 
 ### 落地方式
 
-- 代码：独立仓库 `labelprint` 分支 `task-87` 提交 `1cc4c5a`（即当时线上运行版本）的文件拷入 `apps/labelprint/`；只拷当前文件、不导入其 Git 历史（该仓库无远端，历史里有现场调试记录），原仓库在开发机保留作档案。
+- 代码：独立仓库 `labelprint` 分支 `task-87` 提交 `1cc4c5a`（即当时线上运行版本）的文件拷入 `apps/labelprint/`；只拷当前文件、不导入其 Git 历史（该仓库无远端，历史里有现场调试记录），原仓库已于 2026-10-23 验收后从开发机移除（移入废纸篓）；需要追溯旧提交时以本仓库 `apps/labelprint/docs/progress.md` 与 `progress/2026-10-22-task-87.md` 为准。
 - 安装：`build-bundle.sh` 把标签服务打进 `app.zip` 的 `labelprint\`，`runtime\` 增加 `python-3.13.15-embed-amd64.zip` 与 `python-packages-<清单摘要>.zip`；`install.ps1` 停三个服务、备份标签历史库、替换 `app\`、装 Python 与依赖、注册 `LabWorkspace-LabelPrint`（取代并删除旧任务 `LabelPrintService`，取消 72 小时运行上限），最后核对网页健康与标签服务版本号。
 - 数据：打印历史库留在 `C:\labelprint\data\labelprint.db`，路径不变；每次安装前自动复制到 `E:\lab-workspace\backups\labelprint_<时间>.db`。
 - 版本：`app\VERSION` 一份，标签服务 `/api/status` 返回同一个 `version`。
