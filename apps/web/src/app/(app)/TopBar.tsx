@@ -68,6 +68,25 @@ export default function TopBar({ user }: { user: SessionUser }) {
   const [open, setOpen] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const navRef = useRef<HTMLElement | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 光标移入稍等再展开、移出稍等再收起，避免划过时闪一下；点击与键盘仍可用。
+  const clearTimers = () => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    openTimer.current = null;
+    closeTimer.current = null;
+  };
+  const hoverOpen = (key: string) => {
+    clearTimers();
+    openTimer.current = setTimeout(() => setOpen(key), 120);
+  };
+  const hoverClose = () => {
+    clearTimers();
+    closeTimer.current = setTimeout(() => setOpen(null), 200);
+  };
+  useEffect(() => clearTimers, []);
 
   const inGroup = (group: NavGroup) =>
     group.items.some((item) => path === item.href || path.startsWith(`${item.href}/`));
@@ -119,13 +138,18 @@ export default function TopBar({ user }: { user: SessionUser }) {
           const active = inGroup(group);
           const expanded = open === group.key;
           return (
-            <div className="nav-group" key={group.key}>
+            <div
+             className="nav-group"
+             key={group.key}
+             onMouseEnter={() => hoverOpen(group.key)}
+             onMouseLeave={hoverClose}
+           >
               <button
                 type="button"
                 className={active ? "nav-btn active" : "nav-btn"}
                 aria-haspopup="menu"
                 aria-expanded={expanded}
-                onClick={() => setOpen(expanded ? null : group.key)}
+                onClick={() => { clearTimers(); setOpen(expanded ? null : group.key); }}
               >
                 {group.label}
                 <span className="caret" aria-hidden="true">▾</span>

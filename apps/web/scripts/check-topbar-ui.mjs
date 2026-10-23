@@ -61,6 +61,13 @@ try {
   await page.mouse.click(1200, 300);
   await page.getByRole('menu').waitFor({ state: 'detached' });
 
+  // 光标移到分组上直接展开，移开后自动收起
+  await page.hover('.nav-group:nth-child(2) .nav-btn');
+  await page.getByRole('menu').waitFor();
+  assert.deepEqual(await compact(page.getByRole('menuitem')), ['部门物料', '常用耗材', '固定资产']);
+  await page.mouse.move(1200, 320);
+  await page.getByRole('menu').waitFor({ state: 'detached' });
+
   // 窄屏：分组仍是一行按钮，不出现换行错位
   await page.setViewportSize({ width: 560, height: 420 });
   const wide = await page.locator('.nav-menus').boundingBox();
@@ -71,7 +78,7 @@ try {
   await page.waitForTimeout(150);
   await page.screenshot({ path: join(evidence, 'topbar-narrow.png') });
 
-  console.log(JSON.stringify({ status: 'passed', checks: ['五个分组一行', '库存菜单三项', '点空白收起', '窄屏不换行', '工具菜单含标签打印'], screenshots: evidence }));
+  console.log(JSON.stringify({ status: 'passed', checks: ['五个分组一行', '库存菜单三项', '点空白收起', '悬停展开与移开收起', '窄屏不换行', '工具菜单含标签打印'], screenshots: evidence }));
 } finally {
   await browser?.close();
   if (server) await new Promise((r) => server.close(r));

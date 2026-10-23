@@ -102,7 +102,7 @@ try {
   assert.equal(previewRequests, 1);
   assert.equal(previewBody?.source, 'materials');
   assert.equal(previewBody?.template, 'name-only');
-  assert.deepEqual(previewBody?.fields, ['item_name', 'material_code', 'spec_model']);
+  assert.deepEqual(previewBody?.fields, ['item_name', 'spec_model']);
   assert.equal(await page.getByAltText(/标签纸预览/).count(), 1);
 
   const printerSelect = page.getByLabel('打印机');

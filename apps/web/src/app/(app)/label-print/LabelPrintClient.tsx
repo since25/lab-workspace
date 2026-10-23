@@ -22,7 +22,7 @@ const TEMPLATES: { key: string; label: string; hint: string }[] = [
 ];
 
 const DEFAULT_FIELDS: Record<SourceKey, string[]> = {
-  materials: ["item_name", "material_code", "spec_model"],
+  materials: ["item_name", "spec_model"],
   freezer: ["name", "project_no", "sample_type"],
   assets: ["asset_name", "asset_code", "spec_model"],
 };

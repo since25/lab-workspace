@@ -33,6 +33,7 @@ V1 功能已开发完成：登录与账号管理、细胞冻存库、冰箱管�
 - `docs/consumable-stock.md`：常用耗材库存的类别配置、状态口径、API 与核对流程
 - `docs/material-inventory-research.md`：采购周期取数方法、访谈提纲与开源库存项目评估
 - `docs/agent-mcp.md`：用 MCP agent 查询采购/库存并提交待审批的库存校对请求
+- `docs/label-print.md`：标签打印的来源、纸张与模板字号、打印流程与设备登记
 - `apps/web/`：网页与 API（Next.js）
 - `apps/r-engine/`：分析服务（R plumber，算法来自 EditR_wang）
 - `apps/mcp-server/`：给 agent 用的 MCP stdio 服务（检索采购/库存、提交库存校对请求）
