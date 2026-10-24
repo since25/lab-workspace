@@ -150,4 +150,8 @@
 
 `label_printers` 是全局打印机目录，保存工作台显示名、传给本机标签服务的 `printer_key`、启用状态和默认标记。`label_print_jobs` 记录请求编号、用户、设备、模板、字段、行数和送出状态，用唯一 `request_id` 防止重复提交；不保存标签原始内容。`template` 存 `来源:模板`（如 `materials:name-only`），便于回溯当时的数据来源与版式。
 
+### label_templates（TASK-90）
+
+管理员在「管理 → 标签模板」复制内置模板后保存的自定义模板：`source`（只对一个来源可用）、`name`（同来源下未删除的模板不重名）、`base_template`（基于哪套内置模板：`name-detail` / `uniform` / `name-only`）、`name_pt`（12–72）、`detail_pt`（10–48）、`line_gap`（字段行距 0–20 点）、`fields`（有序数组 `[{key, prefix}]`，第一个是大字标题、前缀不打印）。删除只置 `is_deleted`，历史打印记录仍能对上。用自定义模板打印时 `label_print_jobs.template_id` 记模板编号，`template` 记 `来源:custom-<编号>`；内置模板 `template_id` 为空。
+
 标签打印的数据来源与字段白名单在 `apps/web/src/lib/label-sources.ts` 一处声明（部门物料、冰箱在库样品、固定资产），页面表格、接口校验和标签行生成都由它派生；新增来源只需补一段取数 SQL。

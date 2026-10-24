@@ -64,6 +64,28 @@ TEMPLATES = {
 }
 DEFAULT_TEMPLATE = "name-detail"
 
+# 自定义模板（工作台管理员在页面上调）的可调范围：名称/字段字号与字段行距（点）。
+# 自动缩字号的下限取内置模板下限与设定值中较小的一个，设得比下限还小也能生效。
+STYLE_LIMITS = {"name_pt": (12, 72), "detail_pt": (10, 48), "line_gap": (0, 20)}
+
+
+def custom_style(template: str, overrides: dict) -> dict:
+    """在内置模板基础上套用自定义字号与行距；超出范围抛 ValueError。"""
+    base = TEMPLATES.get(template)
+    if base is None:
+        raise ValueError("不支持的标签模板")
+    style = dict(base)
+    for key, (low, high) in STYLE_LIMITS.items():
+        if key not in overrides:
+            continue
+        value = overrides[key]
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            raise ValueError("%s 必须是 %d 到 %d 的整数" % (key, low, high))
+        style[key] = value
+    style["name_min"] = min(base["name_min"], style["name_pt"])
+    style["detail_min"] = min(base["detail_min"], style["detail_pt"])
+    return style
+
 _BOLD_PATH, _BOLD_IDX, _REG_PATH, _REG_IDX = fonts.resolve()
 
 
@@ -292,13 +314,14 @@ def _measure(lines: list[str], font, gap: int = 0) -> int:
     return len(lines) * _line_height(font) + (len(lines) - 1) * gap
 
 
-def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE) -> Image.Image:
+def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE, style: dict | None = None) -> Image.Image:
     """渲染 30 mm 双列纸的一格。
 
     名称最多两行、字段最多两行，按可用高度整体垂直居中；先按大字号排版，
     放不下再逐步缩字号，避免短名称被顶在上边、下面空掉一大片。
     """
-    style = TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
+    style = style or TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
+    line_gap = style.get("line_gap", SLOT_LINE_GAP)
     img = Image.new("1", (SLOT_W, LABEL_H), 1)
     draw = ImageDraw.Draw(img)
     usable_w = SLOT_W - 2 * SLOT_MARGIN_X
@@ -327,7 +350,7 @@ def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE) -> Ima
                 if any(w is None for w in wrapped):
                     continue
                 height = _measure(name_lines, name_font) + (SLOT_NAME_GAP if details else 0)
-                height += sum(_measure(w, font, SLOT_LINE_GAP) for w in wrapped)
+                height += sum(_measure(w, font, line_gap) for w in wrapped)
                 if height <= usable_h:
                     chosen = (name_lines, name_font, wrapped, font, height)
                     detail_pt = size
@@ -354,11 +377,11 @@ def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE) -> Ima
                 w = [d]
             wrapped.append(w)
         height = _measure(name_lines, name_font) + (SLOT_NAME_GAP if details else 0)
-        height += sum(_measure(w, font, SLOT_LINE_GAP) for w in wrapped)
+        height += sum(_measure(w, font, line_gap) for w in wrapped)
         while height > usable_h and wrapped:
             wrapped.pop()
             height = _measure(name_lines, name_font) + (SLOT_NAME_GAP if wrapped else 0)
-            height += sum(_measure(w, font, SLOT_LINE_GAP) for w in wrapped)
+            height += sum(_measure(w, font, line_gap) for w in wrapped)
         chosen = (name_lines, name_font, wrapped, font, height)
 
     name_lines, name_font, wrapped, detail_font, height = chosen
@@ -372,16 +395,17 @@ def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE) -> Ima
             for line in lines:
                 draw.text((SLOT_MARGIN_X, y), line, font=detail_font, fill=0)
                 y += _line_height(detail_font)
-            y += SLOT_LINE_GAP
+            y += line_gap
     return img
 
 
-def render_two_up(rows: list[LabelRow], date_str: str, template: str = DEFAULT_TEMPLATE) -> Image.Image:
+def render_two_up(rows: list[LabelRow], date_str: str, template: str = DEFAULT_TEMPLATE,
+                  style: dict | None = None) -> Image.Image:
     """把最多两张标签排在同一张双列载体上，奇数时右列保持空白。"""
     if not 1 <= len(rows) <= 2:
         raise ValueError("双列标签一次需要 1 至 2 行")
     media = Image.new("1", (LABEL_W, LABEL_H), 1)
     for index, row in enumerate(rows):
         x = 0 if index == 0 else SLOT_W + TWO_UP_GAP
-        media.paste(_render_compact_slot(row, template), (x, 0))
+        media.paste(_render_compact_slot(row, template, style), (x, 0))
     return media

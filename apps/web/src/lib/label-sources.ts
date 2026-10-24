@@ -208,15 +208,17 @@ export async function getSourceItems(db: MaterialQuery, source: SourceKey, ids: 
 }
 
 // 名称走 sample（大字），其余字段按「标签：值」逐行拼进 note；空值自动跳过。
-export function labelRows(items: SourceItem[], source: SourceKey, fields: string[]) {
+// 自定义模板传 prefixes 时，字段前缀按模板原样拼（可为空，表示只打值）。
+export function labelRows(items: SourceItem[], source: SourceKey, fields: string[], prefixes?: Record<string, string>) {
   const def = sourceDef(source);
   return items.map((item) => {
     const values = fields
-      .map((key) => ({ label: def.fields.find((f) => f.key === key)?.label ?? key, value: String(item[key] ?? "").trim() }))
+      .map((key) => ({ key, label: def.fields.find((f) => f.key === key)?.label ?? key, value: String(item[key] ?? "").trim() }))
       .filter((v) => v.value);
     if (!values.length) throw new HttpError(400, `记录「${String(item.name ?? item.item_name ?? item.asset_name ?? item.id)}」没有可打印内容`);
     const [first, ...rest] = values;
-    return { sample: first.value, note: rest.map((v) => `${v.label}：${v.value}`).join("；") };
+    const prefix = (v: { key: string; label: string }) => prefixes && v.key in prefixes ? prefixes[v.key] : `${v.label}：`;
+    return { sample: first.value, note: rest.map((v) => `${prefix(v)}${v.value}`).join("；") };
   });
 }
 

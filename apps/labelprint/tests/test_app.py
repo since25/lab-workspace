@@ -547,3 +547,20 @@ def test_preview_includes_media_for_ui_frame(client):
     r = client.post("/api/preview", json={"layout": "two-up", "rows": [{"sample": "S"}]})
     body = json.loads(r.data)
     assert body["media"]["width_mm"] == 59.5
+
+
+def test_preview_accepts_custom_style(client):
+    rows = [{"sample": "LEFT", "note": "编码：M-1；规格：500g"}]
+    plain = json.loads(client.post("/api/preview", json={"layout": "two-up", "template": "name-detail", "rows": rows}).data)
+    styled = client.post("/api/preview", json={"layout": "two-up", "template": "name-detail", "rows": rows,
+                                               "style": {"name_pt": 24, "detail_pt": 16, "line_gap": 10}})
+    assert styled.status_code == 200
+    assert json.loads(styled.data)["images"] != plain["images"]
+
+
+def test_preview_and_print_reject_bad_style(client):
+    for path in ("/api/preview", "/api/print"):
+        r = client.post(path, json={"layout": "two-up", "template": "name-detail", "rows": [{"sample": "S"}],
+                                    "style": {"name_pt": 200}})
+        assert r.status_code == 400
+        assert "样式" in json.loads(r.data)["error"]

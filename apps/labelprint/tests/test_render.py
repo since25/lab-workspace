@@ -342,3 +342,34 @@ def test_short_name_is_vertically_centered():
     box = _ink_bbox(media)
     top, bottom = box[1], render.LABEL_H - box[3]
     assert abs(top - bottom) <= 8, f"内容没有垂直居中：上 {top} 下 {bottom}"
+
+
+def test_custom_style_changes_size_and_line_gap():
+    """自定义模板（TASK-90）：字号变大名称更高，行距加大字段整体更高；不传样式与内置逐字节一致。"""
+    row = LabelRow(sample="示例耗材", note="规格型号：500g；品牌：示例品牌")
+
+    def slot(style=None):
+        return render.render_two_up([row], "2026-10-23", "name-detail", style).crop((0, 0, render.SLOT_W, render.LABEL_H))
+
+    builtin = slot()
+    same = slot(render.custom_style("name-detail", {}))
+    assert same.tobytes() == builtin.tobytes()
+
+    def height(img):
+        box = _ink_bbox(img)
+        return box[3] - box[1]
+
+    assert height(slot(render.custom_style("name-detail", {"line_gap": 12}))) > height(builtin)
+    small = slot(render.custom_style("name-detail", {"name_pt": 20, "detail_pt": 14}))
+    assert height(small) < height(builtin)
+
+
+def test_custom_style_rejects_out_of_range_and_lowers_min():
+    with pytest.raises(ValueError):
+        render.custom_style("name-detail", {"name_pt": 100})
+    with pytest.raises(ValueError):
+        render.custom_style("name-detail", {"line_gap": "3"})
+    with pytest.raises(ValueError):
+        render.custom_style("fancy", {})
+    style = render.custom_style("name-detail", {"name_pt": 14, "detail_pt": 11})
+    assert style["name_min"] == 14 and style["detail_min"] == 11

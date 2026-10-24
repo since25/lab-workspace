@@ -50,6 +50,7 @@ const ADMIN_GROUP: NavGroup = {
   items: [
     { href: "/admin/users", label: "账号管理" },
     { href: "/admin/printers", label: "打印机管理" },
+    { href: "/admin/label-templates", label: "标签模板" },
     { href: "/admin/materials", label: "物料审批" },
     { href: "/admin/materials/reconcile", label: "库存校对" },
     { href: "/admin/audit", label: "操作记录" },

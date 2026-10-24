@@ -7,7 +7,8 @@ type SourceKey = "materials" | "freezer" | "assets";
 type Item = Record<string, string | number | boolean> & { id: number };
 type Field = { key: string; label: string };
 type Printer = { id: number; printer_key: string; name: string; enabled: boolean; is_default: boolean; ready?: boolean; reason?: string; jobs?: number; notes?: string };
-type Preview = { images: string[]; count: number; media_count?: number; fields: string[]; template?: string; media?: Media };
+type Preview = { images: string[]; count: number; media_count?: number; fields: string[]; template?: string; template_label?: string; media?: Media };
+type CustomTemplate = { id: number; name: string; base_template: string; fields: { key: string; prefix: string }[] };
 type Media = { dpi: number; width_mm: number; height_mm: number; slot_width_mm: number; slot_height_mm: number; columns: number };
 
 // 纸张尺寸兜底值：标签服务不可用或还没返回时，仍能显示 30×15 双列的标注。
@@ -31,6 +32,11 @@ const DEFAULT_FIELDS: Record<SourceKey, string[]> = {
   assets: ["asset_name", "asset_code", "spec_model"],
 };
 
+// 每次提交一个新编号，服务端据此拦截重复提交
+function newRequestId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+}
+
 export default function LabelPrintPage() {
   const [source, setSource] = useState<SourceKey>("materials");
   const [items, setItems] = useState<Item[]>([]);
@@ -41,7 +47,9 @@ export default function LabelPrintPage() {
   const [q, setQ] = useState("");
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [printerId, setPrinterId] = useState("");
+  // 内置模板用 key；自定义模板用 "custom:<id>"，字段与顺序由模板决定
   const [template, setTemplate] = useState("name-detail");
+  const [customs, setCustoms] = useState<CustomTemplate[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<"load" | "preview" | "print" | "">("");
   const [error, setError] = useState("");
@@ -56,15 +64,19 @@ export default function LabelPrintPage() {
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const sheets = Math.ceil(ids.length / 2) * copies;
+  const custom = template.startsWith("custom:") ? customs.find((t) => `custom:${t.id}` === template) : undefined;
 
   const load = async (nextSource = source, nextPage = page, nextSize = pageSize) => {
     setBusy("load");
     try {
-      const [itemData, printerData] = await Promise.all([
+      const [itemData, printerData, templateData] = await Promise.all([
         api<{ items: Item[]; total: number; page: number; page_size: number; fields: Field[]; columns: Field[] }>(
           `/api/v1/label-print/items?source=${nextSource}&q=${encodeURIComponent(q)}&page=${nextPage}&page_size=${nextSize}`),
         api<{ printers: Printer[] }>("/api/v1/label-print/printers"),
+        api<{ templates: CustomTemplate[] }>(`/api/v1/label-print/templates?source=${nextSource}`),
       ]);
+      setCustoms(templateData.templates);
+      if (template.startsWith("custom:") && !templateData.templates.some((t) => `custom:${t.id}` === template)) setTemplate("name-detail");
       setItems(itemData.items);
       setFields(itemData.fields);
       setColumns(itemData.columns);
@@ -90,6 +102,7 @@ export default function LabelPrintPage() {
     setSelected(new Set());
     setPreview(null);
     setSelectedFields(DEFAULT_FIELDS[next]);
+    setTemplate("name-detail");
     setQ("");
     void load(next, 1, pageSize);
   }
@@ -115,7 +128,14 @@ export default function LabelPrintPage() {
 
   function switchTemplate(key: string) {
     setTemplate(key);
+    const picked = customs.find((t) => `custom:${t.id}` === key);
+    if (picked) setSelectedFields(picked.fields.map((f) => f.key));
     setPreview(null);
+  }
+
+  // 预览/打印的模板参数：自定义模板只传编号，字段与前缀由服务端按模板取
+  function templateBody() {
+    return custom ? { template_id: custom.id } : { template };
   }
 
   async function makePreview() {
@@ -126,7 +146,7 @@ export default function LabelPrintPage() {
     try {
       setPreview(await api<Preview>("/api/v1/label-print/preview", {
         method: "POST",
-        body: JSON.stringify({ source, ids, fields: selectedFields, template }),
+        body: JSON.stringify({ source, ids, fields: selectedFields, ...templateBody() }),
       }));
     } catch (e) { setError(errText(e)); }
     finally { setBusy(""); }
@@ -141,8 +161,8 @@ export default function LabelPrintPage() {
       const result = await api<{ message?: string; sent?: number; printer?: string }>("/api/v1/label-print/print", {
         method: "POST",
         body: JSON.stringify({
-          request_id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-          source, ids, fields: selectedFields, template, printer_id: Number(printerId), copies,
+          request_id: newRequestId(),
+          source, ids, fields: selectedFields, ...templateBody(), printer_id: Number(printerId), copies,
         }),
       });
       setNotice(`${result.message || `已送出 ${result.sent ?? preview.count} 张`}，打印机：${result.printer || "已选设备"}`);
@@ -213,16 +233,24 @@ export default function LabelPrintPage() {
               {t.label}<span className="flag">{slotSize} mm</span><span className="muted">{t.hint}</span>
             </label>
           ))}
+          {customs.map((t) => (
+            <label key={t.id} style={{ display: "flex", gap: 6, alignItems: "center", marginRight: 12 }}>
+              <input type="radio" name="template" style={{ minHeight: 0 }} checked={template === `custom:${t.id}`} onChange={() => switchTemplate(`custom:${t.id}`)} />
+              {t.name}<span className="flag">自定义</span>
+            </label>
+          ))}
         </div>
         <div className="toolbar">
           <strong>打印字段</strong>
           {fields.map((field) => (
             <label key={field.key} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input type="checkbox" style={{ minHeight: 0 }} checked={selectedFields.includes(field.key)} onChange={() => toggleField(field.key)} />
+              <input type="checkbox" style={{ minHeight: 0 }} checked={selectedFields.includes(field.key)} disabled={!!custom} onChange={() => toggleField(field.key)} />
               {field.label}
             </label>
           ))}
-          <span className="muted">{template === "name-only" ? "仅名称模板只打印第一个选中字段" : "第一个选中字段作为大字标题，其余逐行"}</span>
+          <span className="muted">{custom
+            ? `字段与顺序由模板「${custom.name}」决定：${custom.fields.map((f) => fields.find((x) => x.key === f.key)?.label ?? f.key).join(" → ")}`
+            : template === "name-only" ? "仅名称模板只打印第一个选中字段" : "第一个选中字段作为大字标题，其余逐行"}</span>
         </div>
       </section>
 
@@ -254,7 +282,7 @@ export default function LabelPrintPage() {
           <h2>预览</h2>
           <p className="muted">
             共 {preview.count} 个标签，{preview.media_count ?? preview.images.length} 张标签纸；份数 {copies}；
-            模板：{TEMPLATES.find((t) => t.key === (preview.template ?? template))?.label ?? template}；
+            模板：{preview.template_label ?? TEMPLATES.find((t) => t.key === (preview.template ?? template))?.label ?? template}；
             字段：{preview.fields.map((key) => fields.find((f) => f.key === key)?.label ?? key).join("、")}
           </p>
           <div className="preview-grid">{preview.images.map((image, i) => (

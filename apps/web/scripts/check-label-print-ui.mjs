@@ -71,6 +71,7 @@ try {
       return route.fulfill({ json: { source, items, total: items.length, page: 1, page_size: 20, fields: fieldsBySource[source], columns: columnsBySource[source] } });
     }
     if (url.pathname.endsWith('/printers')) return route.fulfill({ json: { printers } });
+    if (url.pathname.endsWith('/templates')) return route.fulfill({ json: { templates: [] } });
     if (url.pathname.endsWith('/media')) return route.fulfill({ json: { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2 } });
     if (url.pathname.endsWith('/preview')) { previewRequests += 1; previewBody = req.postDataJSON(); return route.fulfill({ json: { images: [sampleLabel], count: previewBody.ids.length, media_count: 1, fields: previewBody.fields, template: previewBody.template, layout: 'two-up' } }); }
     if (url.pathname.endsWith('/print')) { printRequests += 1; printBody = req.postDataJSON(); return route.fulfill({ json: { message: '已送出 2 张', sent: 2, printer: '示例打印机 A' } }); }

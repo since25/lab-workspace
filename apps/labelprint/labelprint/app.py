@@ -64,13 +64,23 @@ def _row_to_json(r: LabelRow):
     return {"sample": r.sample, "conc": r.conc, "ratio": r.ratio, "note": r.note}
 
 
-def _render_images(rows, date_str, layout, template="name-detail"):
+def _parse_style(payload, template):
+    """工作台自定义模板传来的字号/行距；没传返回 None（按内置模板），不合法抛 ValueError。"""
+    raw = payload.get("style")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("模板样式格式不正确")
+    return render.custom_style(template, raw)
+
+
+def _render_images(rows, date_str, layout, template="name-detail", style=None):
     """按布局与模板生成位图；two-up 按输入顺序填左、右列。"""
     if layout == "two-up":
         images = []
         for index in range(0, len(rows), 2):
             try:
-                images.append(render.render_two_up(rows[index:index + 2], date_str, template))
+                images.append(render.render_two_up(rows[index:index + 2], date_str, template, style))
             except render.LabelTooLongError as exc:
                 raise render.LabelTooLongError(f"第 {index + 1} 个有效行：{exc}") from exc
         return images
@@ -161,6 +171,10 @@ def create_app():
         template = str(payload.get("template", "name-detail")).strip().lower()
         if template not in render.TEMPLATES:
             return jsonify({"error": "不支持的标签模板"}), 400
+        try:
+            style = _parse_style(payload, template)
+        except ValueError as exc:
+            return jsonify({"error": "模板样式不合法：%s" % exc}), 400
         # 手工录入不经过 /api/parse，这里必须重复校验一次，否则网页上手动加一千行
         # 就能绕开上传时的行数上限，一次渲染一千张图
         if len(rows) > config.MAX_ROWS:
@@ -168,7 +182,7 @@ def create_app():
         today = date.today().strftime("%Y-%m-%d")
         images = []
         try:
-            for image in _render_images(rows, today, layout, template):
+            for image in _render_images(rows, today, layout, template, style):
                 buf = io.BytesIO()
                 image.save(buf, format="PNG")
                 images.append(base64.b64encode(buf.getvalue()).decode("ascii"))
@@ -188,6 +202,10 @@ def create_app():
         template = str(payload.get("template", "name-detail")).strip().lower()
         if template not in render.TEMPLATES:
             return jsonify({"error": "不支持的标签模板"}), 400
+        try:
+            style = _parse_style(payload, template)
+        except ValueError as exc:
+            return jsonify({"error": "模板样式不合法：%s" % exc}), 400
         operator = str(payload.get("operator", "")).strip()
         printer_id = str(payload.get("printer_id", "")).strip()
         client_ip = request.remote_addr or ""
@@ -215,7 +233,7 @@ def create_app():
         today = date.today().strftime("%Y-%m-%d")
         images = []
         try:
-            images = _render_images(rows, today, layout, template)
+            images = _render_images(rows, today, layout, template, style)
         except render.LabelTooLongError as exc:
             return jsonify({"error": str(exc)}), 400
         job = tspl.build_job(images, copies=copies, invert=config.INVERT)

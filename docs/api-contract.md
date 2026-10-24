@@ -112,5 +112,8 @@
 - `GET /label-print/printers`：返回启用的全局打印机及通过本机标签服务查询到的状态。
 - `GET /label-print/media`：代理标签服务的 `/api/media`，返回纸张与单格尺寸（毫米、dpi、列数），页面用于模板规格标注和等比预览外框。
 - `POST /label-print/preview`：`{source, ids, fields, template}`，生成预览位图；不打印。`template` 取 `name-detail`（名称大字 + 字段逐行，默认）、`uniform`（全字段等宽）、`name-only`（仅名称、超大字号）。工作台代理到标签服务时带 `layout:"two-up"` 与同一个 `template`：按选择顺序两两排入 30×15 mm 双列标签纸，奇数最后一条落左列、右列留空。
+- `GET /label-print/templates?source=`：列出该来源未删除的自定义模板（TASK-90），开通标签打印的账号都可读。
+- 预览/打印传 `template_id`（自定义模板编号）代替 `template` 时，字段、顺序与前缀以模板为准，忽略请求里的 `fields`；工作台转给标签服务时 `template` 取模板的 `base_template`，并附带 `style:{name_pt, detail_pt, line_gap}`。预览另接受 `draft`（未保存的模板参数，结构同下方管理接口），仅管理员可用，供编辑页预览。
+- `GET|POST /admin/label-templates`、`PATCH|DELETE /admin/label-templates/:id`：管理员维护自定义模板，请求体 `{source, name, base_template, name_pt, detail_pt, line_gap, fields:[{key, prefix}]}`；来源创建后不能改；删除为隐藏。
 - `POST /label-print/print`：`{request_id, source, ids, fields, template, printer_id, copies}`，`copies` 取 1–20（默认 1）；服务端校验账号开关、来源范围、字段白名单和启用设备后代理到 `LABELPRINT_URL`，并附带 `layout:"two-up"` 与 `template`；同一 `request_id` 只能提交一次。标签服务未带布局参数时保留旧的单幅标签兼容行为。
 - `GET/POST /admin/printers`、`PATCH /admin/printers/:id`：仅管理员管理全局打印机目录。
