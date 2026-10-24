@@ -9,6 +9,8 @@
 | 部门物料 | `material_items` | 名称、物料编码、规格型号、品牌、部门、单位 | 按 `MATERIAL_DISPLAY_DEPARTMENTS_JSON` 展示部门 |
 | 冰箱样品 | `freezer_samples`（仅 `stored`） | 样品信息、项目号、样品类型、位置、存入日期、备注 | 普通成员只看自己的；管理员或「冰箱总览」看全部 |
 | 固定资产 | `fixed_assets` | 资产名称、资产编号、规格型号、存放地点、使用人、使用部门 | 按 `ASSET_DISPLAY_DEPARTMENTS_JSON` 展示部门 |
+| 细胞冻存 | `cell_inventory`（在库） | 细胞名称、代次、冻存日期、位置、冻存人、密度、来源、冻存液、管数、备注 | 全体在库细胞可见；支持按在库管数（每管一张）倍增打印 |
+| 自定义 CSV | `label_custom_batches` / `label_custom_items` | CSV 实际表头动态字段（首列默认作大字标题） | 普通成员看自己的批次；管理员可看全部批次 |
 
 可见性按账号控制：`users.label_print_enabled`（与「冰箱总览」同一模型），管理员在「账号管理」勾选或关闭；关掉只影响入口与接口，不影响登录。
 

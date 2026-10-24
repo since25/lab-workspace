@@ -2,7 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { handle, HttpError, ok, readJson } from "@/lib/http";
 import { callLabelPrint, requireLabelPrinting } from "@/lib/label-print";
-import { getSourceItems, labelRows, parseItemIds, parseSource, parseSourceFields } from "@/lib/label-sources";
+import { expandByTubeCount, getSourceItems, labelRows, parseItemIds, parseSource, parseSourceFields } from "@/lib/label-sources";
 import { parseTemplateDraft, resolveDraft, resolveTemplate } from "@/lib/label-templates";
 
 export const POST = handle(async (req: Request) => {
@@ -18,7 +18,10 @@ export const POST = handle(async (req: Request) => {
     resolved = await resolveTemplate(query, source, body);
   }
   const fields = resolved.fields ?? parseSourceFields(source, body.fields);
-  const items = await getSourceItems(query, source, parseItemIds(body.ids), user);
+  let items = await getSourceItems(query, source, parseItemIds(body.ids), user);
+  if (source === "cells" && body.by_tube_count === true) {
+    items = expandByTubeCount(items);
+  }
   const result = await callLabelPrint("/api/preview", {
     rows: labelRows(items, source, fields, resolved.prefixes), layout: "two-up", template: resolved.template,
     ...(resolved.style ? { style: resolved.style } : {}),

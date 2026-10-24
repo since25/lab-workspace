@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, errText } from "@/lib/client";
 
-type SourceKey = "materials" | "freezer" | "assets";
+type SourceKey = "materials" | "freezer" | "assets" | "cells" | "custom";
 type Item = Record<string, string | number | boolean> & { id: number };
 type Field = { key: string; label: string };
 type Printer = { id: number; printer_key: string; name: string; enabled: boolean; is_default: boolean; ready?: boolean; reason?: string; jobs?: number; notes?: string };
 type Preview = { images: string[]; count: number; media_count?: number; fields: string[]; template?: string; template_label?: string; media?: Media };
 type CustomTemplate = { id: number; name: string; base_template: string; fields: { key: string; prefix: string }[] };
 type Media = { dpi: number; width_mm: number; height_mm: number; slot_width_mm: number; slot_height_mm: number; columns: number };
+type CustomBatch = { id: number; batch_name: string; row_count: number; created_at: string };
 
 // 纸张尺寸兜底值：标签服务不可用或还没返回时，仍能显示 30×15 双列的标注。
 const FALLBACK_MEDIA: Media = { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2 };
@@ -18,6 +19,8 @@ const SOURCES: { key: SourceKey; label: string; hint: string }[] = [
   { key: "materials", label: "部门物料", hint: "采购入库的物料与试剂" },
   { key: "freezer", label: "冰箱样品", hint: "在库样品、项目号与位置" },
   { key: "assets", label: "固定资产", hint: "设备与台账资产" },
+  { key: "cells", label: "细胞冻存", hint: "冻存管、代次与位置" },
+  { key: "custom", label: "自定义 CSV", hint: "上传并固化 CSV 批次数据" },
 ];
 
 const TEMPLATES: { key: string; label: string; hint: string }[] = [
@@ -30,6 +33,8 @@ const DEFAULT_FIELDS: Record<SourceKey, string[]> = {
   materials: ["item_name", "spec_model"],
   freezer: ["name", "project_no", "sample_type"],
   assets: ["asset_name", "asset_code", "spec_model"],
+  cells: ["cell_name", "passage", "frozen_on", "location", "depositor"],
+  custom: [],
 };
 
 // 每次提交一个新编号，服务端据此拦截重复提交
@@ -59,27 +64,57 @@ export default function LabelPrintPage() {
   const [total, setTotal] = useState(0);
   const [copies, setCopies] = useState(1);
   const [media, setMedia] = useState<Media>(FALLBACK_MEDIA);
+  const [byTubeCount, setByTubeCount] = useState(false);
+  const [tubeCountMap, setTubeCountMap] = useState<Record<number, number>>({});
+  const [batches, setBatches] = useState<CustomBatch[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const ids = useMemo(() => [...selected], [selected]);
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  const sheets = Math.ceil(ids.length / 2) * copies;
+  const totalLabels = useMemo(() => {
+    if (source === "cells" && byTubeCount) {
+      return ids.reduce((sum, id) => sum + (tubeCountMap[id] ?? 1), 0);
+    }
+    return ids.length;
+  }, [source, byTubeCount, ids, tubeCountMap]);
+  const sheets = Math.ceil(totalLabels / 2) * copies;
   const custom = template.startsWith("custom:") ? customs.find((t) => `custom:${t.id}` === template) : undefined;
 
-  const load = async (nextSource = source, nextPage = page, nextSize = pageSize) => {
+  const load = async (nextSource = source, nextPage = page, nextSize = pageSize, nextQ = q, nextBatchId = selectedBatchId) => {
     setBusy("load");
     try {
-      const [itemData, printerData, templateData] = await Promise.all([
-        api<{ items: Item[]; total: number; page: number; page_size: number; fields: Field[]; columns: Field[] }>(
-          `/api/v1/label-print/items?source=${nextSource}&q=${encodeURIComponent(q)}&page=${nextPage}&page_size=${nextSize}`),
+      const batchParam = nextSource === "custom" && nextBatchId ? `&batch_id=${nextBatchId}` : "";
+      const [itemData, printerData, templateData, batchData] = await Promise.all([
+        api<{ items: Item[]; total: number; page: number; page_size: number; fields: Field[]; columns: Field[]; batch_id?: number }>(
+          `/api/v1/label-print/items?source=${nextSource}&q=${encodeURIComponent(nextQ)}&page=${nextPage}&page_size=${nextSize}${batchParam}`),
         api<{ printers: Printer[] }>("/api/v1/label-print/printers"),
         api<{ templates: CustomTemplate[] }>(`/api/v1/label-print/templates?source=${nextSource}`),
+        nextSource === "custom" ? api<{ batches: CustomBatch[] }>("/api/v1/label-print/custom-batches") : Promise.resolve({ batches: [] }),
       ]);
       setCustoms(templateData.templates);
       if (template.startsWith("custom:") && !templateData.templates.some((t) => `custom:${t.id}` === template)) setTemplate("name-detail");
       setItems(itemData.items);
+      if (nextSource === "custom") {
+        setBatches(batchData.batches);
+        if (itemData.batch_id && itemData.batch_id !== selectedBatchId) {
+          setSelectedBatchId(itemData.batch_id);
+        }
+      }
+      setTubeCountMap((prev) => {
+        const next = { ...prev };
+        itemData.items.forEach((item) => {
+          const n = Number(item.tube_count);
+          next[item.id] = Number.isSafeInteger(n) && n > 0 ? n : 1;
+        });
+        return next;
+      });
       setFields(itemData.fields);
       setColumns(itemData.columns);
+      if (nextSource === "custom" && itemData.fields.length > 0) {
+        setSelectedFields((old) => old.length ? old : itemData.fields.slice(0, 3).map((f) => f.key));
+      }
       setTotal(itemData.total);
       setPage(itemData.page);
       setPageSize(itemData.page_size);
@@ -101,10 +136,45 @@ export default function LabelPrintPage() {
     setSource(next);
     setSelected(new Set());
     setPreview(null);
+    setByTubeCount(false);
     setSelectedFields(DEFAULT_FIELDS[next]);
     setTemplate("name-detail");
     setQ("");
-    void load(next, 1, pageSize);
+    void load(next, 1, pageSize, "", selectedBatchId);
+  }
+
+  function handleBatchChange(newBatchId: number) {
+    setSelectedBatchId(newBatchId);
+    setSelected(new Set());
+    setPreview(null);
+    setSelectedFields([]);
+    void load("custom", 1, pageSize, q, newBatchId);
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    setNotice("");
+    try {
+      const text = await file.text();
+      const res = await api<{ batch: CustomBatch }>("/api/v1/label-print/custom-batches", {
+        method: "POST",
+        body: JSON.stringify({ batch_name: file.name, csv_text: text }),
+      });
+      setNotice(`CSV 批次「${res.batch.batch_name}」上传成功，共 ${res.batch.row_count} 条`);
+      setSelectedBatchId(res.batch.id);
+      setSelected(new Set());
+      setPreview(null);
+      setSelectedFields([]);
+      void load("custom", 1, pageSize, "", res.batch.id);
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
   }
 
   function toggleField(key: string) {
@@ -146,7 +216,7 @@ export default function LabelPrintPage() {
     try {
       setPreview(await api<Preview>("/api/v1/label-print/preview", {
         method: "POST",
-        body: JSON.stringify({ source, ids, fields: selectedFields, ...templateBody() }),
+        body: JSON.stringify({ source, ids, fields: selectedFields, by_tube_count: byTubeCount, ...templateBody() }),
       }));
     } catch (e) { setError(errText(e)); }
     finally { setBusy(""); }
@@ -162,7 +232,7 @@ export default function LabelPrintPage() {
         method: "POST",
         body: JSON.stringify({
           request_id: newRequestId(),
-          source, ids, fields: selectedFields, ...templateBody(), printer_id: Number(printerId), copies,
+          source, ids, fields: selectedFields, by_tube_count: byTubeCount, ...templateBody(), printer_id: Number(printerId), copies,
         }),
       });
       setNotice(`${result.message || `已送出 ${result.sent ?? preview.count} 张`}，打印机：${result.printer || "已选设备"}`);
@@ -189,7 +259,7 @@ export default function LabelPrintPage() {
           <span className="spacer" />
           <span className="muted">共 {total} 条 · 第 {page} / {pages} 页</span>
           <label className="field">搜索
-            <input value={q} placeholder="名称 / 编码 / 规格" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void load(source, 1, pageSize); }} />
+            <input value={q} placeholder="名称 / 编码 / 代次 / 存放人" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void load(source, 1, pageSize); }} />
           </label>
           <button onClick={() => void load(source, 1, pageSize)} disabled={busy !== ""}>搜索</button>
           <label className="field">每页
@@ -200,6 +270,29 @@ export default function LabelPrintPage() {
           <button onClick={() => void load(source, page - 1, pageSize)} disabled={busy !== "" || page <= 1}>上一页</button>
           <button onClick={() => void load(source, page + 1, pageSize)} disabled={busy !== "" || page >= pages}>下一页</button>
         </div>
+        {source === "custom" && (
+          <div className="toolbar" style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}>
+            <label className="field">当前 CSV 批次
+              <select
+                value={selectedBatchId ?? ""}
+                onChange={(e) => handleBatchChange(Number(e.target.value))}
+                disabled={busy !== "" || uploading}
+              >
+                {!batches.length && <option value="">暂无已上传批次</option>}
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.batch_name}（{b.row_count} 条，{b.created_at}）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="primary button" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer", margin: 0, padding: "6px 12px", borderRadius: 4, background: "var(--primary, #0066cc)", color: "#fff", fontSize: "0.9rem" }}>
+              {uploading ? "上传中..." : "上传新 CSV"}
+              <input type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => void handleFileUpload(e)} disabled={uploading} />
+            </label>
+            <span className="muted">上传后自动固化入库，首列默认作为标签大字标题</span>
+          </div>
+        )}
       </section>
 
       <section className="panel">
@@ -256,11 +349,25 @@ export default function LabelPrintPage() {
 
       <section className="panel" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
         <div className="toolbar">
-          <span>已选 <strong>{ids.length}</strong> 条</span>
+          <span>已选 <strong>{ids.length}</strong> 条{source === "cells" && byTubeCount && <>（共 <strong>{totalLabels}</strong> 管）</>}</span>
           <span className="muted">双列纸约 {sheets} 张</span>
           <button className="link" onClick={() => { setSelected(new Set()); setPreview(null); }} disabled={!ids.length}>清空选择</button>
           <span className="muted">纸张 {sheetSize} · {media.columns} 列</span>
           <span className="spacer" />
+          {source === "cells" && (
+            <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", marginRight: 12 }}>
+              <input
+                type="checkbox"
+                style={{ minHeight: 0 }}
+                checked={byTubeCount}
+                onChange={(e) => {
+                  setByTubeCount(e.target.checked);
+                  setPreview(null);
+                }}
+              />
+              按在库管数打印对应张数（每管一张）
+            </label>
+          )}
           <label className="field">份数
             <input type="number" min={1} max={20} step={1} style={{ width: 80 }} value={copies} onChange={(e) => setCopies(Math.min(20, Math.max(1, Number(e.target.value) || 1)))} />
           </label>

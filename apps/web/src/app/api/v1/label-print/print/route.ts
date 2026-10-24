@@ -3,7 +3,7 @@ import { audit } from "@/lib/audit";
 import { query } from "@/lib/db";
 import { handle, HttpError, ok, readJson, str } from "@/lib/http";
 import { callLabelPrint, listPrinters, requireLabelPrinting } from "@/lib/label-print";
-import { getSourceItems, labelRows, parseCopies, parseItemIds, parseSource, parseSourceFields } from "@/lib/label-sources";
+import { expandByTubeCount, getSourceItems, labelRows, parseCopies, parseItemIds, parseSource, parseSourceFields } from "@/lib/label-sources";
 import { resolveTemplate } from "@/lib/label-templates";
 
 export const POST = handle(async (req: Request) => {
@@ -21,7 +21,10 @@ export const POST = handle(async (req: Request) => {
   if (!Number.isSafeInteger(printerId) || printerId <= 0) throw new HttpError(400, "请选择打印机");
   const [printer] = await listPrinters(query, true).then((rows) => rows.filter((p) => p.id === printerId && p.enabled));
   if (!printer) throw new HttpError(400, "打印机不存在或已停用，请刷新后重试");
-  const items = await getSourceItems(query, source, ids, user);
+  let items = await getSourceItems(query, source, ids, user);
+  if (source === "cells" && body.by_tube_count === true) {
+    items = expandByTubeCount(items);
+  }
   const rows = labelRows(items, source, fields, resolved.prefixes);
   try {
     await query(
@@ -45,7 +48,7 @@ export const POST = handle(async (req: Request) => {
       operator: user.display_name,
     });
     await query("UPDATE label_print_jobs SET status='sent', result=$2, updated_at=now() WHERE request_id=$1", [requestId, JSON.stringify(result)]);
-    await audit(user.id, "label_print.sent", "label_print_job", requestId, { printer: printer.name, row_count: rows.length, copies, source, template, template_id: resolved.templateId, fields }, req);
+    await audit(user.id, "label_print.sent", "label_print_job", requestId, { printer: printer.name, row_count: rows.length, copies, source, template, template_id: resolved.templateId, fields, by_tube_count: body.by_tube_count === true }, req);
     return ok({ ...result, request_id: requestId, printer: printer.name, count: rows.length, copies, source, template, template_id: resolved.templateId });
   } catch (e) {
     await query("UPDATE label_print_jobs SET status='failed', result=$2, updated_at=now() WHERE request_id=$1", [requestId, JSON.stringify({ error: e instanceof Error ? e.message : String(e) })]);

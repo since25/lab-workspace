@@ -5,10 +5,10 @@ import { formatLocation } from "./freezer";
 import { canViewAllFreezer, type SessionUser } from "./auth";
 import type { MaterialQuery } from "./materials-list";
 
-// 标签打印的数据来源：部门物料、冰箱样品、固定资产。
+// 标签打印的数据来源：部门物料、冰箱样品、固定资产、细胞冻存、自定义 CSV。
 // 每个来源声明可打印字段（同时作为表格列）和取数 SQL，页面与接口都按这里生成，
 // 新增来源只需要在 SOURCES 里加一项并补 FROM / WHERE 分支。
-export type SourceKey = "materials" | "freezer" | "assets";
+export type SourceKey = "materials" | "freezer" | "assets" | "cells" | "custom";
 export type SourceField = { key: string; label: string };
 export type SourceItem = Record<string, string | number | boolean> & { id: number };
 
@@ -77,6 +77,43 @@ export const SOURCES: SourceDef[] = [
       { key: "user_name", label: "使用人" },
     ],
   },
+  {
+    key: "cells",
+    label: "细胞冻存",
+    fields: [
+      { key: "cell_name", label: "细胞名称" },
+      { key: "passage", label: "代次" },
+      { key: "frozen_on", label: "冻存日期" },
+      { key: "location", label: "位置" },
+      { key: "depositor", label: "冻存人" },
+      { key: "density", label: "细胞密度" },
+      { key: "source", label: "来源" },
+      { key: "freezing_medium", label: "冻存液" },
+      { key: "tube_count", label: "管数" },
+      { key: "remarks", label: "备注" },
+    ],
+    columns: [
+      { key: "cell_name", label: "细胞名称" },
+      { key: "passage", label: "代次" },
+      { key: "location", label: "位置" },
+      { key: "depositor", label: "冻存人" },
+      { key: "frozen_on", label: "冻存日期" },
+      { key: "tube_count", label: "管数" },
+    ],
+  },
+  {
+    key: "custom",
+    label: "自定义 CSV",
+    fields: [
+      { key: "title", label: "标题" },
+      { key: "col2", label: "第2列" },
+      { key: "col3", label: "第3列" },
+    ],
+    columns: [
+      { key: "title", label: "标题" },
+      { key: "col2", label: "第2列" },
+    ],
+  },
 ];
 
 export const TEMPLATES = [
@@ -108,8 +145,13 @@ export function sourceDef(key: SourceKey): SourceDef {
 }
 
 export function parseSourceFields(source: SourceKey, value: unknown): string[] {
-  const def = sourceDef(source);
   if (!Array.isArray(value)) throw new HttpError(400, "请选择至少一个打印字段");
+  if (source === "custom") {
+    const fields = [...new Set(value.map((v) => str(v)).filter(Boolean))];
+    if (!fields.length) throw new HttpError(400, "请选择至少一个有效打印字段");
+    return fields;
+  }
+  const def = sourceDef(source);
   const fields = [...new Set(value.map((v) => str(v)))].filter((v) => def.fields.some((f) => f.key === v));
   if (!fields.length) throw new HttpError(400, "请选择至少一个有效打印字段");
   return fields;
@@ -119,6 +161,8 @@ const FROM: Record<SourceKey, string> = {
   materials: "material_items m",
   freezer: "freezer_samples s JOIN freezer_containers ct ON ct.id = s.container_id JOIN freezers f ON f.id = ct.freezer_id",
   assets: "fixed_assets a",
+  cells: "cell_inventory c",
+  custom: "label_custom_items ci",
 };
 
 function listWhere(source: SourceKey, sp: URLSearchParams, user: SessionUser): { where: string; params: unknown[] } {
@@ -139,6 +183,21 @@ function listWhere(source: SourceKey, sp: URLSearchParams, user: SessionUser): {
     if (q) where += ` AND (s.name ILIKE ${add(like)} OR s.project_no ILIKE ${add(like)} OR s.sample_type ILIKE ${add(like)} OR s.remarks ILIKE ${add(like)} OR ct.name ILIKE ${add(like)})`;
     return { where, params };
   }
+  if (source === "cells") {
+    // 细胞冻存：全体在库管数大于 0 或未标记管数的记录可打印；支持搜索名称、代次、存放人、来源或备注。
+    let where = "(c.tube_count > 0 OR c.tube_count IS NULL)";
+    if (q) where += ` AND (c.cell_name ILIKE ${add(like)} OR c.passage ILIKE ${add(like)} OR c.depositor ILIKE ${add(like)} OR c.source ILIKE ${add(like)} OR c.remarks ILIKE ${add(like)})`;
+    return { where, params };
+  }
+  if (source === "custom") {
+    const batchId = Number(sp.get("batch_id"));
+    let where = user.role === "admin" ? "true" : `ci.user_id = ${add(user.id)}`;
+    if (Number.isSafeInteger(batchId) && batchId > 0) {
+      where += ` AND ci.batch_id = ${add(batchId)}`;
+    }
+    if (q) where += ` AND (ci.title ILIKE ${add(like)} OR ci.data::text ILIKE ${add(like)})`;
+    return { where, params };
+  }
   const departments = assetDisplayDepartments();
   let where = departments.includes("*") ? "true" : `a.department = ANY(${add(departments)}::text[])`;
   if (q) where += ` AND (a.asset_name ILIKE ${add(like)} OR a.asset_code ILIKE ${add(like)} OR a.asset_code_new ILIKE ${add(like)} OR a.spec_model ILIKE ${add(like)} OR a.location ILIKE ${add(like)})`;
@@ -156,18 +215,32 @@ const SELECT: Record<SourceKey, string> = {
   assets: `SELECT a.id, a.asset_name, COALESCE(NULLIF(a.asset_code_new, ''), NULLIF(a.asset_code, ''), '') AS asset_code,
                   a.spec_model, a.location, a.user_name, a.department
              FROM ${FROM.assets}`,
+  cells: `SELECT c.id, c.cell_name, c.passage, c.density, c.source, c.freezing_medium,
+                 c.tube_count, c.depositor, to_char(c.frozen_on, 'YYYY-MM-DD') AS frozen_on,
+                 c.rack_no, c.layer_no, c.remarks
+            FROM ${FROM.cells}`,
+  custom: `SELECT ci.id, ci.batch_id, ci.title, ci.data, ci.row_idx, to_char(ci.created_at, 'YYYY-MM-DD') AS created_at
+             FROM ${FROM.custom}`,
 };
 
 const ORDER: Record<SourceKey, string> = {
   materials: "m.item_name ASC, m.id ASC",
   freezer: "s.name ASC, s.id ASC",
   assets: "a.asset_name ASC, a.id ASC",
+  cells: "c.rack_no ASC, c.layer_no ASC, c.cell_name ASC, c.id ASC",
+  custom: "ci.batch_id DESC, ci.row_idx ASC, ci.id ASC",
 };
 
-const ALIAS: Record<SourceKey, string> = { materials: "m", freezer: "s", assets: "a" };
+const ALIAS: Record<SourceKey, string> = { materials: "m", freezer: "s", assets: "a", cells: "c", custom: "ci" };
 
-// 冰箱样品把容器/冰箱信息拼成一行「位置」，与冰箱页面显示一致。
+// 冰箱样品与细胞冻存把层架信息拼成易读的「位置」。
 function withLocation(source: SourceKey, rows: SourceItem[]): SourceItem[] {
+  if (source === "cells") {
+    return rows.map((row) => ({
+      ...row,
+      location: row.rack_no && row.layer_no ? `${row.rack_no}号架 / ${row.layer_no}层` : "",
+    }));
+  }
   if (source !== "freezer") return rows;
   return rows.map((row) => ({
     ...row,
@@ -186,9 +259,47 @@ function withLocation(source: SourceKey, rows: SourceItem[]): SourceItem[] {
 }
 
 export async function listSourceItems(db: MaterialQuery, source: SourceKey, sp: URLSearchParams, user: SessionUser) {
-  const { where, params } = listWhere(source, sp, user);
   const pageSize = Math.min(Math.max(Number(sp.get("page_size")) || MATERIAL_PAGE_SIZE, 1), 100);
   const page = Math.max(Number(sp.get("page")) || 1, 1);
+
+  if (source === "custom") {
+    let batchId = Number(sp.get("batch_id"));
+    if (!Number.isSafeInteger(batchId) || batchId <= 0) {
+      const [latest] = await db<{ id: number }>(
+        `SELECT id FROM label_custom_batches WHERE ${user.role === "admin" ? "true" : "user_id = $1"} ORDER BY id DESC LIMIT 1`,
+        user.role === "admin" ? [] : [user.id]
+      );
+      batchId = latest?.id ?? 0;
+    }
+    if (!batchId) {
+      return { source, items: [], total: 0, page: 1, page_size: pageSize, fields: [], columns: [], batch_id: null, batch_name: "" };
+    }
+    const [batch] = await db<{ id: number; headers: string[]; batch_name: string }>(
+      `SELECT id, headers, batch_name FROM label_custom_batches WHERE id = $1`,
+      [batchId]
+    );
+    const headers: string[] = Array.isArray(batch?.headers) ? batch.headers : [];
+    const fields = headers.map((h) => ({ key: h, label: h }));
+    const columns = headers.slice(0, 5).map((h) => ({ key: h, label: h }));
+
+    const querySp = new URLSearchParams(sp);
+    querySp.set("batch_id", String(batchId));
+    const { where, params } = listWhere(source, querySp, user);
+    const [{ count }] = await db<{ count: number }>(`SELECT count(*)::int AS count FROM ${FROM[source]} WHERE ${where}`, params);
+    const rows = await db<{ id: number; title: string; data: Record<string, string> }>(
+      `${SELECT[source]} WHERE ${where} ORDER BY ${ORDER[source]} LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+      params,
+    );
+    const items: SourceItem[] = rows.map((r) => ({
+      id: r.id,
+      ...(r.data || {}),
+      ...(headers[0] ? { [headers[0]]: r.title } : { title: r.title }),
+      title: r.title,
+    }));
+    return { source, items, total: count, page, page_size: pageSize, fields, columns, batch_id: batchId, batch_name: batch?.batch_name };
+  }
+
+  const { where, params } = listWhere(source, sp, user);
   const [{ count }] = await db<{ count: number }>(`SELECT count(*)::int AS count FROM ${FROM[source]} WHERE ${where}`, params);
   const rows = await db<SourceItem>(
     `${SELECT[source]} WHERE ${where} ORDER BY ${ORDER[source]} LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
@@ -198,6 +309,21 @@ export async function listSourceItems(db: MaterialQuery, source: SourceKey, sp: 
 }
 
 export async function getSourceItems(db: MaterialQuery, source: SourceKey, ids: number[], user: SessionUser): Promise<SourceItem[]> {
+  if (source === "custom") {
+    const where = user.role === "admin" ? "ci.id = ANY($1::int[])" : "ci.id = ANY($1::int[]) AND ci.user_id = $2";
+    const params = user.role === "admin" ? [ids] : [ids, user.id];
+    const rows = await db<{ id: number; batch_id: number; title: string; data: Record<string, string> }>(
+      `SELECT ci.id, ci.batch_id, ci.title, ci.data FROM label_custom_items ci WHERE ${where} ORDER BY array_position($1::int[], ci.id)`,
+      params
+    );
+    if (rows.length !== ids.length) throw new HttpError(404, "部分自定义记录不存在或已被删除，请刷新后重试");
+    return rows.map((r) => ({
+      id: r.id,
+      ...(r.data || {}),
+      title: r.title,
+    }));
+  }
+
   const { where, params } = listWhere(source, new URLSearchParams(), user);
   const rows = await db<SourceItem>(
     `${SELECT[source]} WHERE ${where} AND ${ALIAS[source]}.id = ANY($${params.length + 1}::int[]) ORDER BY array_position($${params.length + 1}::int[], ${ALIAS[source]}.id)`,
@@ -210,16 +336,29 @@ export async function getSourceItems(db: MaterialQuery, source: SourceKey, ids: 
 // 名称走 sample（大字），其余字段按「标签：值」逐行拼进 note；空值自动跳过。
 // 自定义模板传 prefixes 时，字段前缀按模板原样拼（可为空，表示只打值）。
 export function labelRows(items: SourceItem[], source: SourceKey, fields: string[], prefixes?: Record<string, string>) {
-  const def = sourceDef(source);
+  const def = source !== "custom" ? sourceDef(source) : null;
   return items.map((item) => {
     const values = fields
-      .map((key) => ({ key, label: def.fields.find((f) => f.key === key)?.label ?? key, value: String(item[key] ?? "").trim() }))
+      .map((key) => ({ key, label: def?.fields.find((f) => f.key === key)?.label ?? key, value: String(item[key] ?? "").trim() }))
       .filter((v) => v.value);
-    if (!values.length) throw new HttpError(400, `记录「${String(item.name ?? item.item_name ?? item.asset_name ?? item.id)}」没有可打印内容`);
+    if (!values.length) throw new HttpError(400, `记录「${String(item.name ?? item.item_name ?? item.asset_name ?? item.cell_name ?? item.title ?? item.id)}」没有可打印内容`);
     const [first, ...rest] = values;
     const prefix = (v: { key: string; label: string }) => prefixes && v.key in prefixes ? prefixes[v.key] : `${v.label}：`;
     return { sample: first.value, note: rest.map((v) => `${prefix(v)}${v.value}`).join("；") };
   });
+}
+
+// 细胞冻存场景：若开启按管数打印，每条记录按在库管数展开多份（单条上限 50 份，<=0 或空按 1 份）
+export function expandByTubeCount(items: SourceItem[]): SourceItem[] {
+  const expanded: SourceItem[] = [];
+  for (const item of items) {
+    const raw = Number(item.tube_count);
+    const count = Number.isSafeInteger(raw) && raw > 0 ? Math.min(raw, 50) : 1;
+    for (let i = 0; i < count; i++) {
+      expanded.push(item);
+    }
+  }
+  return expanded;
 }
 
 // 供预览/打印接口复用的入参校验
