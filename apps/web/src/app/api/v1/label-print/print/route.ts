@@ -48,7 +48,7 @@ export const POST = handle(async (req: Request) => {
       operator: user.display_name,
     });
     await query("UPDATE label_print_jobs SET status='sent', result=$2, updated_at=now() WHERE request_id=$1", [requestId, JSON.stringify(result)]);
-    await audit(user.id, "label_print.sent", "label_print_job", requestId, { printer: printer.name, row_count: rows.length, copies, source, template, template_id: resolved.templateId, fields, by_tube_count: body.by_tube_count === true }, req);
+    await audit(user.id, "label_print.sent", "label_print_job", requestId, { printer: printer.name, row_count: rows.length, copies, source, template, template_id: resolved.templateId, fields, by_tube_count: body.by_tube_count === true, ...(resolved.style ? { style: resolved.style } : {}) }, req);
     return ok({ ...result, request_id: requestId, printer: printer.name, count: rows.length, copies, source, template, template_id: resolved.templateId });
   } catch (e) {
     await query("UPDATE label_print_jobs SET status='failed', result=$2, updated_at=now() WHERE request_id=$1", [requestId, JSON.stringify({ error: e instanceof Error ? e.message : String(e) })]);

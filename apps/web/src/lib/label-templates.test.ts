@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readdir, readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { labelRows } from "./label-sources";
-import { listTemplates, parseTemplateDraft, resolveTemplate } from "./label-templates";
+import { BUILTIN_STYLES, listTemplates, parseStyleOverride, parseTemplateDraft, resolveDraft, resolveTemplate } from "./label-templates";
 import type { MaterialQuery } from "./materials-list";
 
 const db = new PGlite();
@@ -13,7 +13,7 @@ const draft = (changes: Record<string, unknown> = {}) => ({
   ...changes,
 });
 
-// 全部迁移按序执行一遍，顺带验证 016 能接在现有结构之后
+// 全部迁移按序执行一遍，验证模板迁移能接在现有结构之后
 beforeAll(async () => {
   const dir = new URL("../../../../db/migrations/", import.meta.url);
   for (const file of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort()) {
@@ -24,6 +24,34 @@ beforeAll(async () => {
 afterAll(() => db.close());
 
 describe("自定义模板校验", () => {
+  it("对齐缺省为左对齐，草稿预览保留两种对齐", () => {
+    expect(parseTemplateDraft(draft())).toMatchObject({ name_align: "left", detail_align: "left" });
+    expect(resolveDraft(parseTemplateDraft(draft({ name_align: "center", detail_align: "right" }))).style)
+      .toMatchObject({ name_align: "center", detail_align: "right" });
+    expect(() => parseTemplateDraft(draft({ name_align: "justify" }))).toThrow("名称对齐");
+    expect(() => parseTemplateDraft(draft({ detail_align: null }))).toThrow("字段对齐");
+  });
+
+  it("自定义 CSV 接受任意列名、去重并跳过空列名，缺失列不参与排版", () => {
+    const t = parseTemplateDraft(draft({ source: "custom", fields: [
+      { key: "示例名称", prefix: "" }, { key: "示例分类", prefix: "分类：" },
+      { key: "示例名称", prefix: "重复" }, { key: " ", prefix: "" }, { key: 42, prefix: "" },
+    ] }));
+    expect(t.fields).toEqual([{ key: "示例名称", prefix: "" }, { key: "示例分类", prefix: "分类：" }]);
+    const resolved = resolveDraft(t);
+    expect(labelRows([{ id: 1, 示例名称: "示例条目" }], "custom", resolved.fields!, resolved.prefixes))
+      .toEqual([{ sample: "示例条目", note: "" }]);
+  });
+
+  it("自定义 CSV 限制列名长度与去重后的字段数", () => {
+    const fields = Array.from({ length: 30 }, (_, i) => ({ key: `示例列${i}`, prefix: "" }));
+    expect(parseTemplateDraft(draft({ source: "custom", fields: [...fields, fields[0]] })).fields).toHaveLength(30);
+    expect(() => parseTemplateDraft(draft({ source: "custom", fields: [...fields, { key: "额外示例列", prefix: "" }] }))).toThrow("30");
+    expect(parseTemplateDraft(draft({ source: "custom", fields: [{ key: "列".repeat(60), prefix: "" }] })).fields).toHaveLength(1);
+    expect(() => parseTemplateDraft(draft({ source: "custom", fields: [{ key: "列".repeat(61), prefix: "" }] }))).toThrow("60");
+    expect(() => parseTemplateDraft(draft({ source: "custom", fields: [{ key: "", prefix: "" }] }))).toThrow("有效字段");
+  });
+
   it("保留字段顺序与前缀，丢弃未知与重复字段", () => {
     const t = parseTemplateDraft(draft({ fields: [{ key: "spec_model", prefix: "" }, { key: "nope", prefix: "x" }, { key: "spec_model", prefix: "重复" }, { key: "brand", prefix: "牌:" }] }));
     expect(t.fields).toEqual([{ key: "spec_model", prefix: "" }, { key: "brand", prefix: "牌:" }]);
@@ -48,6 +76,37 @@ describe("自定义模板校验", () => {
   });
 });
 
+describe("本次打印样式覆盖", () => {
+  const base = BUILTIN_STYLES["name-detail"];
+
+  it("合并合法覆盖并保留默认值，不修改原样式", () => {
+    expect(parseStyleOverride({ name_pt: 40, line_gap: 0, name_align: "center", detail_align: "right" }, base))
+      .toEqual({ ...base, name_pt: 40, line_gap: 0, name_align: "center", detail_align: "right" });
+    expect(base.name_pt).toBe(34);
+    expect(parseStyleOverride({}, base)).toEqual(base);
+    expect(parseStyleOverride(null, base)).toBeUndefined();
+    expect(parseStyleOverride(undefined, base)).toBeUndefined();
+  });
+
+  it("拒绝非对象、越界字号、非整数行距和非法对齐", () => {
+    for (const value of [[], "left", 42, true]) expect(() => parseStyleOverride(value, base)).toThrow("必须是对象");
+    for (const value of [11, 73, 34.5]) expect(() => parseStyleOverride({ name_pt: value }, base)).toThrow("名称字号");
+    for (const value of [9, 49]) expect(() => parseStyleOverride({ detail_pt: value }, base)).toThrow("字段字号");
+    for (const value of [-1, 21, 1.5, null, false, [], "2"]) expect(() => parseStyleOverride({ line_gap: value }, base)).toThrow("行距");
+    expect(() => parseStyleOverride({ name_align: "justify" }, base)).toThrow("名称对齐");
+    expect(() => parseStyleOverride({ detail_align: null }, base)).toThrow("字段对齐");
+  });
+
+  it("内置模板不微调时不含 style；微调时合并对应内置默认值", async () => {
+    for (const template of ["name-detail", "uniform", "name-only"] as const) {
+      expect(await resolveTemplate(query, "materials", { template })).not.toHaveProperty("style");
+      expect(await resolveTemplate(query, "materials", { template, style_override: null })).not.toHaveProperty("style");
+      expect((await resolveTemplate(query, "materials", { template, style_override: { name_align: "right" } })).style)
+        .toEqual({ ...BUILTIN_STYLES[template], name_align: "right" });
+    }
+  });
+});
+
 describe("模板存库与选用", () => {
   it("按来源列出、解析为内置模板 + 样式，删除后不可再选", async () => {
     const t = parseTemplateDraft(draft());
@@ -60,6 +119,12 @@ describe("模板存库与选用", () => {
 
     const resolved = await resolveTemplate(query, "materials", { template_id: id });
     expect(resolved).toMatchObject({ template: "name-detail", templateId: id, label: "示例大字模板", style: { name_pt: 40, detail_pt: 16, line_gap: 6 }, fields: ["spec_model", "item_name", "brand"] });
+    expect(resolved.style).toMatchObject({ name_align: "left", detail_align: "left" });
+    await query("UPDATE label_templates SET name_align='center', detail_align='right' WHERE id=$1", [id]);
+    expect((await listTemplates(query, "materials"))[0]).toMatchObject({ name_align: "center", detail_align: "right" });
+    expect((await resolveTemplate(query, "materials", { template_id: id, style_override: { name_pt: 42 } })).style)
+      .toEqual({ name_pt: 42, detail_pt: 16, line_gap: 6, name_align: "center", detail_align: "right" });
+    expect((await resolveTemplate(query, "materials", { template_id: id })).style?.name_pt).toBe(40);
     await expect(resolveTemplate(query, "freezer", { template_id: id })).rejects.toThrow("不适用于当前打印来源");
     expect(await resolveTemplate(query, "materials", { template: "uniform" })).toMatchObject({ template: "uniform", templateId: null });
 
@@ -75,5 +140,11 @@ describe("模板存库与选用", () => {
 
   it("数据库约束拦住越界字号", async () => {
     await expect(query("INSERT INTO label_templates(source,name,base_template,name_pt,detail_pt,line_gap,fields) VALUES ('materials','越界','uniform',99,22,2,'[]')")).rejects.toThrow();
+  });
+
+  it("数据库约束拦住非法对齐", async () => {
+    for (const column of ["name_align", "detail_align"]) {
+      await expect(query(`INSERT INTO label_templates(source,name,base_template,name_pt,detail_pt,line_gap,fields,${column}) VALUES ('materials','非法对齐','uniform',22,22,2,'[]','justify')`)).rejects.toThrow();
+    }
   });
 });

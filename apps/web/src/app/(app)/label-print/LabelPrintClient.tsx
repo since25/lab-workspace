@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errText } from "@/lib/client";
+import { ALIGNS, BUILTIN_STYLES, STYLE_LIMITS, type Align, type LabelStyle } from "@/lib/label-styles";
+import type { LabelTemplate } from "@/lib/label-templates";
+import type { TemplateKey } from "@/lib/label-sources";
+import type { CustomImportOptions, CustomImportPreview } from "@/lib/label-custom-csv";
 
 type SourceKey = "materials" | "freezer" | "assets" | "cells" | "custom";
 type Item = Record<string, string | number | boolean> & { id: number };
 type Field = { key: string; label: string };
 type Printer = { id: number; printer_key: string; name: string; enabled: boolean; is_default: boolean; ready?: boolean; reason?: string; jobs?: number; notes?: string };
 type Preview = { images: string[]; count: number; media_count?: number; fields: string[]; template?: string; template_label?: string; media?: Media };
-type CustomTemplate = { id: number; name: string; base_template: string; fields: { key: string; prefix: string }[] };
+type CustomTemplate = LabelTemplate;
 type Media = { dpi: number; width_mm: number; height_mm: number; slot_width_mm: number; slot_height_mm: number; columns: number; command_set?: string };
+type UploadPreview = Omit<CustomImportPreview, "columns"> & { columns: NonNullable<CustomImportOptions["columns"]> };
 type CustomBatch = { id: number; batch_name: string; row_count: number; created_at: string };
 
 // 纸张尺寸兜底值：标签服务不可用或还没返回时，仍能显示 30×15 双列的标注。
@@ -20,7 +25,7 @@ const SOURCES: { key: SourceKey; label: string; hint: string }[] = [
   { key: "freezer", label: "冰箱样品", hint: "在库样品、项目号与位置" },
   { key: "assets", label: "固定资产", hint: "设备与台账资产" },
   { key: "cells", label: "细胞冻存", hint: "冻存管、代次与位置" },
-  { key: "custom", label: "自定义 CSV", hint: "上传并固化 CSV 批次数据" },
+  { key: "custom", label: "自定义批次", hint: "上传 Excel / CSV / 粘贴表格生成批次" },
 ];
 
 const TEMPLATES: { key: string; label: string; hint: string }[] = [
@@ -42,7 +47,7 @@ function newRequestId() {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 }
 
-export default function LabelPrintPage() {
+export default function LabelPrintPage({ isAdmin }: { isAdmin: boolean }) {
   const [source, setSource] = useState<SourceKey>("materials");
   const [items, setItems] = useState<Item[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
@@ -55,8 +60,8 @@ export default function LabelPrintPage() {
   // 内置模板用 key；自定义模板用 "custom:<id>"，字段与顺序由模板决定
   const [template, setTemplate] = useState("name-detail");
   const [customs, setCustoms] = useState<CustomTemplate[]>([]);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [busy, setBusy] = useState<"load" | "preview" | "print" | "">("");
+  const [preview, setPreview] = useState<(Preview & { requestBody: string }) | null>(null);
+  const [busy, setBusy] = useState<"load" | "preview" | "print" | "save" | "">("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [page, setPage] = useState(1);
@@ -69,8 +74,17 @@ export default function LabelPrintPage() {
   const [batches, setBatches] = useState<CustomBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadText, setUploadText] = useState("");
+  const [uploadName, setUploadName] = useState("");
+  const [uploadNameEdited, setUploadNameEdited] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState<UploadPreview | null>(null);
+  const uploadFileInput = useRef<HTMLInputElement | null>(null);
   const [editingCell, setEditingCell] = useState<{ id: number; key: string } | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [tuning, setTuning] = useState<LabelStyle | null>(null);
+  const previewController = useRef<AbortController | null>(null);
 
   const ids = useMemo(() => [...selected], [selected]);
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
@@ -84,6 +98,14 @@ export default function LabelPrintPage() {
   const sheets = Math.ceil(totalLabels / 2) * copies;
   const custom = template.startsWith("custom:") ? customs.find((t) => `custom:${t.id}` === template) : undefined;
 
+  const baseTemplate = custom?.base_template ?? (template.startsWith("custom:") ? "name-detail" : template as TemplateKey);
+  const defaultStyle: LabelStyle = custom
+    ? { name_pt: custom.name_pt, detail_pt: custom.detail_pt, line_gap: custom.line_gap, name_align: custom.name_align, detail_align: custom.detail_align }
+    : BUILTIN_STYLES[baseTemplate];
+  const style = tuning ?? defaultStyle;
+  const styleChanged = (Object.keys(defaultStyle) as (keyof LabelStyle)[]).some((key) => style[key] !== defaultStyle[key]);
+  const nameOnly = baseTemplate === "name-only";
+
   const load = async (nextSource = source, nextPage = page, nextSize = pageSize, nextQ = q, nextBatchId = selectedBatchId) => {
     setBusy("load");
     try {
@@ -96,7 +118,7 @@ export default function LabelPrintPage() {
         nextSource === "custom" ? api<{ batches: CustomBatch[] }>("/api/v1/label-print/custom-batches") : Promise.resolve({ batches: [] }),
       ]);
       setCustoms(templateData.templates);
-      if (template.startsWith("custom:") && !templateData.templates.some((t) => `custom:${t.id}` === template)) setTemplate("name-detail");
+      if (template.startsWith("custom:") && !templateData.templates.some((t) => `custom:${t.id}` === template)) { setTemplate("name-detail"); setTuning(null); setPreview(null); }
       setItems(itemData.items);
       if (nextSource === "custom") {
         setBatches(batchData.batches);
@@ -140,7 +162,9 @@ export default function LabelPrintPage() {
   useEffect(() => { void load("materials", 1, 20); }, []);
 
   function switchSource(next: SourceKey) {
+    closeUpload();
     setSource(next);
+    setTuning(null);
     setSelected(new Set());
     setPreview(null);
     setByTubeCount(false);
@@ -158,30 +182,63 @@ export default function LabelPrintPage() {
     void load("custom", 1, pageSize, q, newBatchId);
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  function closeUpload() {
+    setUploadOpen(false);
+    setUploadFile(null);
+    setUploadText("");
+    setUploadName("");
+    setUploadNameEdited(false);
+    setUploadPreview(null);
+  }
+
+  function uploadForm(mode: "preview" | "commit", options: CustomImportOptions) {
+    const form = new FormData();
+    if (uploadFile) form.set("file", uploadFile);
+    else form.set("text", uploadText);
+    form.set("mode", mode);
+    form.set("batch_name", uploadName);
+    form.set("options", JSON.stringify(options));
+    return form;
+  }
+
+  async function recognizeUpload(options: CustomImportOptions = {}) {
+    setUploading(true);
+    setError("");
+    setNotice("");
+    setUploadPreview(null);
+    try {
+      const result = await api<CustomImportPreview>("/api/v1/label-print/custom-batches", {
+        method: "POST", body: uploadForm("preview", options),
+      });
+      setUploadPreview({ ...result, columns: result.columns.map((column) => ({ ...column, keep: true })) });
+      if (!uploadNameEdited) {
+        const name = uploadFile ? uploadFile.name.replace(/\.[^.]+$/, "") : `粘贴-${new Date().toISOString().slice(0, 10)}`;
+        setUploadName(name + (result.sheets.length > 1 ? `-${result.sheet}` : ""));
+      }
+    } catch (err) { setError(errText(err)); }
+    finally { setUploading(false); }
+  }
+
+  async function commitUpload() {
+    if (!uploadPreview) return;
     setUploading(true);
     setError("");
     setNotice("");
     try {
-      const text = await file.text();
+      const { sheet, header_row, title_col, columns } = uploadPreview;
       const res = await api<{ batch: CustomBatch }>("/api/v1/label-print/custom-batches", {
-        method: "POST",
-        body: JSON.stringify({ batch_name: file.name, csv_text: text }),
+        method: "POST", body: uploadForm("commit", { sheet, header_row, title_col, columns }),
       });
-      setNotice(`CSV 批次「${res.batch.batch_name}」上传成功，共 ${res.batch.row_count} 条`);
       setSelectedBatchId(res.batch.id);
       setSelected(new Set());
       setPreview(null);
       setSelectedFields([]);
-      void load("custom", 1, pageSize, "", res.batch.id);
-    } catch (err) {
-      setError(errText(err));
-    } finally {
-      setUploading(false);
-      e.target.value = "";
-    }
+      setQ("");
+      closeUpload();
+      await load("custom", 1, pageSize, "", res.batch.id);
+      setNotice(`批次「${res.batch.batch_name}」导入成功，共 ${res.batch.row_count} 条`);
+    } catch (err) { setError(errText(err)); }
+    finally { setUploading(false); }
   }
 
   async function handleDeleteBatch() {
@@ -269,41 +326,76 @@ export default function LabelPrintPage() {
 
   function switchTemplate(key: string) {
     setTemplate(key);
+    setTuning(null);
     const picked = customs.find((t) => `custom:${t.id}` === key);
     if (picked) setSelectedFields(picked.fields.map((f) => f.key));
     setPreview(null);
   }
 
-  // 预览/打印的模板参数：自定义模板只传编号，字段与前缀由服务端按模板取
+  // 预览与打印共用本次样式；完全恢复默认时不发送覆盖。
   function templateBody() {
-    return custom ? { template_id: custom.id } : { template };
+    return { ...(custom ? { template_id: custom.id } : { template }), ...(styleChanged ? { style_override: style } : {}) };
   }
 
-  async function makePreview() {
+  const previewRequest = JSON.stringify({
+    source, ids, fields: selectedFields, by_tube_count: byTubeCount,
+    printer_id: printers.find((p) => String(p.id) === printerId)?.printer_key,
+    ...templateBody(),
+  });
+  const previewReady = preview?.requestBody === previewRequest;
+
+  const makePreview = useCallback(async (requestBody: string) => {
+    const request = JSON.parse(requestBody) as { ids: number[]; fields: string[] };
     setError(""); setNotice("");
-    if (!ids.length) return setError("请先勾选要打印的记录");
-    if (!selectedFields.length) return setError("请至少选择一个打印字段");
+    if (!request.ids.length) return setError("请先勾选要打印的记录");
+    if (!request.fields.length) return setError("请至少选择一个打印字段");
+    previewController.current?.abort();
+    const controller = new AbortController();
+    previewController.current = controller;
     setBusy("preview");
-    const activePrinter = printers.find((p) => String(p.id) === printerId);
     try {
-      setPreview(await api<Preview>("/api/v1/label-print/preview", {
+      const result = await api<Preview>("/api/v1/label-print/preview", {
+        method: "POST", body: requestBody, signal: controller.signal,
+      });
+      if (!controller.signal.aborted) setPreview({ ...result, requestBody });
+    } catch (e) { if (!controller.signal.aborted) setError(errText(e)); }
+    finally { if (previewController.current === controller) setBusy(""); }
+  }, []);
+
+  // 参数改变或离开页面后丢弃旧预览，避免旧响应覆盖当前效果。
+  useEffect(() => () => { previewController.current?.abort(); }, [previewRequest]);
+  const shownPreviewRequest = preview?.requestBody;
+  useEffect(() => {
+    if (shownPreviewRequest === undefined || shownPreviewRequest === previewRequest) return;
+    const timer = window.setTimeout(() => { void makePreview(previewRequest); }, 400);
+    return () => window.clearTimeout(timer);
+  }, [shownPreviewRequest, previewRequest, makePreview]);
+
+  async function saveTemplate() {
+    const name = window.prompt("新模板名称");
+    if (name === null) return;
+    if (!name.trim()) return setError("模板名称不能为空");
+    setBusy("save"); setError(""); setNotice("");
+    try {
+      const result = await api<{ template: CustomTemplate }>("/api/v1/admin/label-templates", {
         method: "POST",
-        body: JSON.stringify({
-          source,
-          ids,
-          fields: selectedFields,
-          by_tube_count: byTubeCount,
-          printer_id: activePrinter?.printer_key,
-          ...templateBody(),
+        body: JSON.stringify({ source, name: name.trim(), base_template: baseTemplate, ...style,
+          fields: custom?.fields ?? selectedFields.map((key, i) => ({ key, prefix: i === 0 ? "" : `${fields.find((f) => f.key === key)?.label ?? key}：` })),
         }),
-      }));
+      });
+      const data = await api<{ templates: CustomTemplate[] }>(`/api/v1/label-print/templates?source=${source}`);
+      setCustoms(data.templates);
+      setTemplate(`custom:${result.template.id}`);
+      setSelectedFields(result.template.fields.map((f) => f.key));
+      setTuning(null); setPreview(null);
+      setNotice(`已保存并选用模板「${result.template.name}」`);
     } catch (e) { setError(errText(e)); }
     finally { setBusy(""); }
   }
 
   async function print() {
     setError(""); setNotice("");
-    if (!preview) return setError("请先预览，预览确认后才能打印");
+    if (!preview || !previewReady) return setError("请先预览，预览确认后才能打印");
     if (!printerId) return setError("请先选择打印机");
     setBusy("print");
     try {
@@ -333,7 +425,7 @@ export default function LabelPrintPage() {
       <section className="panel">
         <div className="toolbar">
           {SOURCES.map((s) => (
-            <button key={s.key} className={s.key === source ? "primary" : ""} title={s.hint} onClick={() => switchSource(s.key)} disabled={busy !== ""}>
+            <button key={s.key} className={s.key === source ? "primary" : ""} title={s.hint} onClick={() => switchSource(s.key)} disabled={busy !== "" || uploading}>
               {s.label}
             </button>
           ))}
@@ -364,7 +456,7 @@ export default function LabelPrintPage() {
             }}
           >
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: "13px", color: "var(--muted)", whiteSpace: "nowrap" }}>当前 CSV 批次：</span>
+              <span style={{ fontSize: "13px", color: "var(--muted)", whiteSpace: "nowrap" }}>当前批次：</span>
               <select
                 value={selectedBatchId ?? ""}
                 onChange={(e) => handleBatchChange(Number(e.target.value))}
@@ -379,27 +471,9 @@ export default function LabelPrintPage() {
                 ))}
               </select>
             </div>
-            <label
-              className="primary button"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                height: 34,
-                padding: "0 14px",
-                margin: 0,
-                borderRadius: "var(--radius, 4px)",
-                background: "var(--primary, #0066cc)",
-                color: "#fff",
-                fontSize: "13px",
-                whiteSpace: "nowrap",
-                boxSizing: "border-box",
-              }}
-            >
-              {uploading ? "上传中..." : "上传新 CSV"}
-              <input type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => void handleFileUpload(e)} disabled={uploading} />
-            </label>
+            <button type="button" className="primary" onClick={() => setUploadOpen(true)} disabled={uploading || busy !== ""}>
+              上传新批次
+            </button>
             {!!selectedBatchId && (
               <button
                 type="button"
@@ -423,11 +497,92 @@ export default function LabelPrintPage() {
               </button>
             )}
             <span className="muted" style={{ fontSize: "12px", marginLeft: 4, whiteSpace: "nowrap" }}>
-              上传后自动固化入库 · 💡 双击任意单元格可在线修改内容
+              预览确认后导入 · 双击任意单元格可在线修改内容
             </span>
           </div>
         )}
       </section>
+
+      {source === "custom" && uploadOpen && (
+        <section className="panel" aria-label="上传新批次">
+          <fieldset disabled={uploading} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+            <div className="toolbar">
+              <label className="field">选择文件（最多 20 MB）
+                <input ref={uploadFileInput} type="file" accept=".xlsx,.csv,.tsv,.txt" onChange={(e) => {
+                  setUploadFile(e.target.files?.[0] ?? null);
+                  setUploadText(""); setUploadPreview(null); setUploadNameEdited(false); setUploadName("");
+                }} />
+              </label>
+            </div>
+            <label className="field">或粘贴表格（从 Excel / WPS 复制）
+              <textarea rows={4} value={uploadText} style={{ width: "100%", boxSizing: "border-box" }} onChange={(e) => {
+                setUploadText(e.target.value); setUploadFile(null); setUploadPreview(null); setUploadNameEdited(false); setUploadName("");
+                if (uploadFileInput.current) uploadFileInput.current.value = "";
+              }} />
+            </label>
+            <div className="toolbar">
+              <button onClick={() => void recognizeUpload()} disabled={!uploadFile && !uploadText.trim()}>{uploading ? "处理中…" : "识别"}</button>
+              <button onClick={closeUpload}>取消</button>
+            </div>
+            {uploadPreview && (
+              <>
+                <div className="toolbar">
+                  <label className="field">批次名
+                    <input value={uploadName} onChange={(e) => { setUploadName(e.target.value); setUploadNameEdited(true); }} />
+                  </label>
+                  {uploadPreview.sheets.length > 1 && (
+                    <label className="field">工作表
+                      <select value={uploadPreview.sheet} onChange={(e) => void recognizeUpload({ sheet: e.target.value })}>
+                        {uploadPreview.sheets.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label className="field">表头行
+                    <select value={uploadPreview.header_row} onChange={(e) => void recognizeUpload({ sheet: uploadPreview.sheet, header_row: Number(e.target.value) })}>
+                      {Array.from({ length: 10 }, (_, index) => <option key={index} value={index}>第 {index + 1} 行</option>)}
+                    </select>
+                  </label>
+                  <span className="muted">识别到 {uploadPreview.total_rows} 行，展示前 10 行；单批次最多 500 行，导入时跳过所选列全空的行。</span>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr>{uploadPreview.columns.map((column) => (
+                      <th key={column.index}>
+                        <label><input type="checkbox" checked={column.keep} onChange={(e) => {
+                          const keep = e.target.checked;
+                          setUploadPreview((old) => {
+                            if (!old) return old;
+                            const next = old.columns.map((entry) => entry.index === column.index ? { ...entry, keep } : entry);
+                            const titleCol = next.some((entry) => entry.keep && entry.index === old.title_col)
+                              ? old.title_col : next.find((entry) => entry.keep)?.index ?? -1;
+                            return { ...old, columns: next, title_col: titleCol };
+                          });
+                        }} /> 保留</label>
+                        <input aria-label={`第 ${column.index + 1} 列名称`} value={column.name} disabled={!column.keep} onChange={(e) => {
+                          const name = e.target.value;
+                          setUploadPreview((old) => old && ({ ...old, columns: old.columns.map((entry) => entry.index === column.index ? { ...entry, name } : entry) }));
+                        }} />
+                        <label><input type="radio" name="upload-title-column" checked={uploadPreview.title_col === column.index} disabled={!column.keep} onChange={() => {
+                          setUploadPreview((old) => old && ({ ...old, title_col: column.index }));
+                        }} /> 标题</label>
+                      </th>
+                    ))}</tr></thead>
+                    <tbody>{uploadPreview.rows_preview.map((row, rowIndex) => (
+                      <tr key={rowIndex}>{uploadPreview.columns.map((column, colIndex) => (
+                        <td key={column.index} style={{ opacity: column.keep ? 1 : 0.4, whiteSpace: "pre-wrap" }}>{row[colIndex] || "—"}</td>
+                      ))}</tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {!uploadPreview.columns.length && <p className="muted">未识别到数据列，请调整工作表或表头行。</p>}
+                <button className="primary" onClick={() => void commitUpload()} disabled={!uploadPreview.total_rows || !uploadPreview.columns.some((column) => column.keep)}>
+                  确认导入
+                </button>
+              </>
+            )}
+          </fieldset>
+        </section>
+      )}
 
       <section className="panel">
         <div className="table-wrap">
@@ -569,7 +724,7 @@ export default function LabelPrintPage() {
               {printers.map((printer) => <option key={printer.id} value={printer.id} disabled={!printer.enabled || printer.ready === false}>{printer.name}{printer.ready === false ? `（不可用：${printer.reason || "状态未知"}）` : ""}</option>)}
             </select>
           </label>
-          <button className="primary" onClick={() => void makePreview()} disabled={busy !== "" || !ids.length}>预览</button>
+          <button className="primary" onClick={() => void makePreview(previewRequest)} disabled={busy !== "" || !ids.length}>预览</button>
         </div>
         <div className="muted">{printers.map((printer) => <span key={printer.id} style={{ marginRight: 14 }}>{printer.name}：{printer.ready === false ? `未就绪${printer.reason ? `（${printer.reason}）` : ""}` : "就绪"}{printer.jobs ? `，队列 ${printer.jobs}` : ""}</span>)}</div>
         {error && <div className="error">{error}</div>}
@@ -578,6 +733,28 @@ export default function LabelPrintPage() {
 
       {preview && (
         <section className="panel">
+          <div className="toolbar" style={{ flexWrap: "wrap" }}>
+            <strong>微调</strong>
+            {(["name_pt", "detail_pt"] as const).map((key) => {
+              const label = key === "name_pt" ? "名称字号" : "字段字号";
+              const disabled = busy === "print" || busy === "save" || (key === "detail_pt" && nameOnly);
+              return <div key={key} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span>{label}</span>
+                <button aria-label={`减小${label}`} disabled={disabled || style[key] <= STYLE_LIMITS[key][0]} onClick={() => setTuning({ ...style, [key]: Math.max(STYLE_LIMITS[key][0], style[key] - 2) })}>−</button>
+                <span>{style[key]}</span>
+                <button aria-label={`增大${label}`} disabled={disabled || style[key] >= STYLE_LIMITS[key][1]} onClick={() => setTuning({ ...style, [key]: Math.min(STYLE_LIMITS[key][1], style[key] + 2) })}>+</button>
+              </div>;
+            })}
+            {(["name_align", "detail_align"] as const).map((key) => <div key={key} role="group" aria-label={key === "name_align" ? "名称对齐" : "字段对齐"} style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <span>{key === "name_align" ? "名称对齐" : "字段对齐"}</span>
+              {ALIGNS.map((align) => <button key={align} className={style[key] === align ? "primary" : ""} aria-pressed={style[key] === align} disabled={busy === "print" || busy === "save" || (key === "detail_align" && nameOnly)} onClick={() => setTuning({ ...style, [key]: align })}>
+                {({ left: "左", center: "中", right: "右" } satisfies Record<Align, string>)[align]}
+              </button>)}
+            </div>)}
+            <button onClick={() => setTuning(null)} disabled={!styleChanged || busy === "print" || busy === "save"}>恢复默认</button>
+            {isAdmin && <button onClick={() => void saveTemplate()} disabled={busy !== "" || !previewReady}>存为新模板</button>}
+          </div>
+          {!previewReady && <p className="muted" role="status">微调尚未完成预览，请等待更新；若更新失败，可点击「预览」重试。</p>}
           <h2>预览</h2>
           <p className="muted">
             共 {preview.count} 个标签，{preview.media_count ?? preview.images.length} 张标签纸；份数 {copies}；
@@ -595,7 +772,7 @@ export default function LabelPrintPage() {
               <figcaption className="muted">第 {i + 1} 张标签纸 · 预览按实际比例等比显示</figcaption>
             </figure>
           ))}</div>
-          <button className="primary" onClick={() => void print()} disabled={busy !== "" || !printerId}>确认打印（{copies} 份）</button>
+          <button className="primary" onClick={() => void print()} disabled={busy !== "" || !printerId || !previewReady}>确认打印（{copies} 份）</button>
         </section>
       )}
     </>

@@ -5,5 +5,5 @@ import LabelPrintClient from "./LabelPrintClient";
 export default async function LabelPrintPage() {
   const user = await requireUser();
   if (!user.label_print_enabled) notFound();
-  return <LabelPrintClient />;
+  return <LabelPrintClient isAdmin={user.role === "admin"} />;
 }

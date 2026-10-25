@@ -68,10 +68,11 @@ DEFAULT_TEMPLATE = "name-detail"
 # 自定义模板（工作台管理员在页面上调）的可调范围：名称/字段字号与字段行距（点）。
 # 自动缩字号的下限取内置模板下限与设定值中较小的一个，设得比下限还小也能生效。
 STYLE_LIMITS = {"name_pt": (12, 72), "detail_pt": (10, 48), "line_gap": (0, 20)}
+ALIGNS = ("left", "center", "right")
 
 
 def custom_style(template: str, overrides: dict) -> dict:
-    """在内置模板基础上套用自定义字号与行距；超出范围抛 ValueError。"""
+    """套用自定义字号与行距；name_align、detail_align 各选 left/center/right，默认 left，参数非法抛 ValueError。"""
     base = TEMPLATES.get(template)
     if base is None:
         raise ValueError("不支持的标签模板")
@@ -82,6 +83,11 @@ def custom_style(template: str, overrides: dict) -> dict:
         value = overrides[key]
         if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
             raise ValueError("%s 必须是 %d 到 %d 的整数" % (key, low, high))
+        style[key] = value
+    for key in ("name_align", "detail_align"):
+        value = overrides.get(key, "left")
+        if not isinstance(value, str) or value not in ALIGNS:
+            raise ValueError("%s 必须是 left、center 或 right 字符串" % key)
         style[key] = value
     style["name_min"] = min(base["name_min"], style["name_pt"])
     style["detail_min"] = min(base["detail_min"], style["detail_pt"])
@@ -325,6 +331,8 @@ def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE,
     prof = profile or BRADY_30x15_TSPL
     style = style or TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
     line_gap = style.get("line_gap", SLOT_LINE_GAP)
+    name_align = style.get("name_align", "left")
+    detail_align = style.get("detail_align", "left")
     img = Image.new("1", (prof.slot_w, prof.slot_h), 1)
     draw = ImageDraw.Draw(img)
     margin_x = prof.margins[0]
@@ -393,13 +401,23 @@ def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE,
     name_lines, name_font, wrapped, detail_font, height = chosen
     y = margin_top + max(0, (usable_h - height) // 2)
     for line in name_lines:
-        draw.text((margin_x, y), line, font=name_font, fill=0)
+        x = margin_x
+        if name_align == "center":
+            x += (usable_w - _text_width(line, name_font)) // 2
+        elif name_align == "right":
+            x += usable_w - _text_width(line, name_font)
+        draw.text((x, y), line, font=name_font, fill=0)
         y += _line_height(name_font)
     if wrapped:
         y += SLOT_NAME_GAP
         for lines in wrapped:
             for line in lines:
-                draw.text((margin_x, y), line, font=detail_font, fill=0)
+                x = margin_x
+                if detail_align == "center":
+                    x += (usable_w - _text_width(line, detail_font)) // 2
+                elif detail_align == "right":
+                    x += usable_w - _text_width(line, detail_font)
+                draw.text((x, y), line, font=detail_font, fill=0)
                 y += _line_height(detail_font)
             y += line_gap
     return img

@@ -41,7 +41,7 @@ function cellValue(v: ExcelJS.CellValue): Cell {
 }
 
 // 简单 CSV 解析：支持双引号转义和字段内换行
-export function parseCsv(src: string): Cell[][] {
+export function parseCsv(src: string, delimiter = ","): Cell[][] {
   const rows: Cell[][] = [];
   let row: Cell[] = [];
   let field = "";
@@ -55,7 +55,7 @@ export function parseCsv(src: string): Cell[][] {
       } else if (c === '"') quoted = false;
       else field += c;
     } else if (c === '"') quoted = true;
-    else if (c === ",") {
+    else if (c === delimiter) {
       row.push(field === "" ? null : field);
       field = "";
     } else if (c === "\n" || c === "\r") {

@@ -373,3 +373,53 @@ def test_custom_style_rejects_out_of_range_and_lowers_min():
         render.custom_style("fancy", {})
     style = render.custom_style("name-detail", {"name_pt": 14, "detail_pt": 11})
     assert style["name_min"] == 14 and style["detail_min"] == 11
+
+
+@pytest.mark.parametrize("key,row", [
+    ("name_align", LabelRow(sample="示例耗材名称用于换行测试")),
+    ("detail_align", LabelRow(sample="", note="示例字段内容用于检查多行文字对齐的效果")),
+])
+@pytest.mark.parametrize("align", ["center", "right"])
+def test_custom_style_aligns_each_wrapped_line(key, row, align):
+    """名称和字段各自按每行宽度对齐，检查真实墨迹两侧留白。"""
+    style = render.custom_style("name-detail", {key: align})
+    img = render.render_two_up([row], "2026-10-23", style=style).crop((0, 0, render.SLOT_W, render.LABEL_H))
+    bands = []
+    start = None
+    for y in range(img.height):
+        if not _row_is_blank(img, y):
+            if start is None:
+                start = y
+        elif start is not None:
+            bands.append(img.crop((0, start, img.width, y)))
+            start = None
+    assert start is None
+    assert len(bands) == 2, "测试内容应折成两行"
+    for band in bands:
+        box = _ink_bbox(band)
+        left, right = box[0], band.width - box[2]
+        if align == "center":
+            assert abs(left - right) <= 5
+        else:
+            assert right + 30 < left
+
+
+@pytest.mark.parametrize("key", ["name_align", "detail_align"])
+@pytest.mark.parametrize("value", ["justify", "LEFT", "", None, 1, True, [], {}])
+def test_custom_style_rejects_invalid_alignment(key, value):
+    with pytest.raises(ValueError, match=key + " 必须是"):
+        render.custom_style("name-detail", {key: value})
+
+
+@pytest.mark.parametrize("template", list(render.TEMPLATES))
+@pytest.mark.parametrize("overrides", [{}, {"name_align": "left", "detail_align": "left"}])
+def test_custom_style_left_alignment_preserves_bytes(template, overrides):
+    rows = [
+        LabelRow(sample="示例耗材名称用于换行测试", note="物料编码：M-1；品牌：示例品牌"),
+        LabelRow(sample="示例耗材", note="示例字段内容用于检查多行文字对齐的效果"),
+    ]
+    style = render.custom_style(template, overrides)
+    assert style["name_align"] == style["detail_align"] == "left"
+    builtin = render.render_two_up(rows, "2026-10-23", template)
+    custom = render.render_two_up(rows, "2026-10-23", template, style)
+    assert custom.tobytes() == builtin.tobytes()

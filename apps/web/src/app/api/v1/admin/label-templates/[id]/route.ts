@@ -12,10 +12,10 @@ export const PATCH = handle(async (req: Request, ctx: RouteContext<"/api/v1/admi
   if (t.source !== old.source) throw new HttpError(400, "模板的来源不能修改，请另建模板");
   try {
     const [template] = await query<LabelTemplate>(
-      `UPDATE label_templates SET name=$2, base_template=$3, name_pt=$4, detail_pt=$5, line_gap=$6, fields=$7, updated_at=now()
+      `UPDATE label_templates SET name=$2, base_template=$3, name_pt=$4, detail_pt=$5, line_gap=$6, fields=$7, name_align=$8, detail_align=$9, updated_at=now()
         WHERE id=$1 AND NOT is_deleted
-        RETURNING id, source, name, base_template, name_pt, detail_pt, line_gap, fields, updated_at`,
-      [id, t.name, t.base_template, t.name_pt, t.detail_pt, t.line_gap, JSON.stringify(t.fields)],
+        RETURNING id, source, name, base_template, name_pt, detail_pt, line_gap, name_align, detail_align, fields, updated_at`,
+      [id, t.name, t.base_template, t.name_pt, t.detail_pt, t.line_gap, JSON.stringify(t.fields), t.name_align, t.detail_align],
     );
     await audit(admin.id, "admin.label_template_update", "label_template", id, { ...t }, req);
     return ok({ template });
