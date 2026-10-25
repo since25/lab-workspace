@@ -85,12 +85,12 @@ const printers = [
 ];
 
 const customBatches = [
-  { id: 1, batch_name: '已存批次-质粒与抗体样品.csv', headers: ['质粒名称', '浓度', '体积', '日期', '保管人'], row_count: 2, created_at: '2026-10-23 15:30' },
+  { id: 1, batch_name: '已存批次-质粒与抗体样品.csv', headers: ['质粒名称', '浓度', '体积', '纯度', '保存位置', '日期', '保管人'], row_count: 2, created_at: '2026-10-23 15:30' },
 ];
 
 let customItems = [
-  { id: 501, batch_id: 1, 质粒名称: 'pCDNA3.1-EGFP', 浓度: '250 ng/μL', 体积: '50 μL', 日期: '2026-10-23', 保管人: '张三', title: 'pCDNA3.1-EGFP' },
-  { id: 502, batch_id: 1, 质粒名称: 'pX458-SpCas9', 浓度: '500 ng/μL', 体积: '100 μL', 日期: '2026-10-23', 保管人: '李四', title: 'pX458-SpCas9' },
+  { id: 501, batch_id: 1, 质粒名称: 'pCDNA3.1-EGFP', 浓度: '250 ng/μL', 体积: '50 μL', 纯度: 'OD 1.85', 保存位置: '-20℃ 冰箱A-3', 日期: '2026-10-23', 保管人: '张三', title: 'pCDNA3.1-EGFP' },
+  { id: 502, batch_id: 1, 质粒名称: 'pX458-SpCas9', 浓度: '500 ng/μL', 体积: '100 μL', 纯度: 'OD 1.90', 保存位置: '-20℃ 冰箱B-1', 日期: '2026-10-23', 保管人: '李四', title: 'pX458-SpCas9' },
 ];
 
 await build({
@@ -141,7 +141,7 @@ const server = createServer(async (req, res) => {
       const batchId = Number(url.searchParams.get('batch_id')) || (customBatches[0]?.id ?? 1);
       const b = customBatches.find((x) => x.id === batchId) || customBatches[0] || { id: batchId, headers: ['title'] };
       const fields = (b.headers || []).map((h) => ({ key: h, label: h }));
-      const columns = (b.headers || []).slice(0, 5).map((h) => ({ key: h, label: h }));
+      const columns = (b.headers || []).map((h) => ({ key: h, label: h }));
       let items = customItems.filter((x) => x.batch_id === b.id);
       if (q) {
         items = items.filter((item) => JSON.stringify(item).toLowerCase().includes(q));

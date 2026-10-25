@@ -300,15 +300,23 @@ export default function LabelPrintPage() {
           <table>
             <thead>
               <tr>
-                <th><input type="checkbox" aria-label="全选当前页" style={{ minHeight: 0 }} checked={allSelected} onChange={toggleAll} /></th>
-                {columns.map((c) => <th key={c.key}>{c.label}</th>)}
+                <th style={{ width: 40 }}><input type="checkbox" aria-label="全选当前页" style={{ minHeight: 0 }} checked={allSelected} onChange={toggleAll} /></th>
+                {columns.map((c) => <th key={c.key} style={{ whiteSpace: "nowrap" }}>{c.label}</th>)}
               </tr>
             </thead>
             <tbody>
               {items.map((item) => (
                 <tr key={item.id}>
                   <td><input type="checkbox" aria-label={`选择 ${String(item[columns[0]?.key] ?? item.id)}`} style={{ minHeight: 0 }} checked={selected.has(item.id)} onChange={() => toggleItem(item.id)} /></td>
-                  {columns.map((c) => <td key={c.key} className={c.key.includes("code") ? "mono text-col" : "text-col"}>{value(item, c.key)}</td>)}
+                  {columns.map((c, idx) => (
+                    <td
+                      key={c.key}
+                      className={c.key.includes("code") ? "mono" : (source !== "custom" && idx === 0 ? "text-col" : "")}
+                      style={{ whiteSpace: "nowrap" }}
+                    >
+                      {value(item, c.key)}
+                    </td>
+                  ))}
                 </tr>
               ))}
               {!items.length && <tr><td colSpan={columns.length + 1} className="muted">没有符合条件的可打印记录</td></tr>}
@@ -333,7 +341,7 @@ export default function LabelPrintPage() {
             </label>
           ))}
         </div>
-        <div className="toolbar">
+        <div className="toolbar" style={{ flexWrap: "wrap" }}>
           <strong>打印字段</strong>
           {fields.map((field) => (
             <label key={field.key} style={{ display: "flex", gap: 6, alignItems: "center" }}>

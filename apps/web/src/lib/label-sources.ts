@@ -280,7 +280,7 @@ export async function listSourceItems(db: MaterialQuery, source: SourceKey, sp: 
     );
     const headers: string[] = Array.isArray(batch?.headers) ? batch.headers : [];
     const fields = headers.map((h) => ({ key: h, label: h }));
-    const columns = headers.slice(0, 5).map((h) => ({ key: h, label: h }));
+    const columns = headers.map((h) => ({ key: h, label: h }));
 
     const querySp = new URLSearchParams(sp);
     querySp.set("batch_id", String(batchId));
