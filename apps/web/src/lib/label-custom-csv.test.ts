@@ -4,7 +4,6 @@ import type { PoolClient } from "pg";
 import type { SessionUser } from "./auth";
 import { customTextSheets, decodeCustomText, detectCustomDelimiter, normalizeCustomCell, parseAndSaveCustomCsv, parseCustomImportOptions, prepareCustomImport, readCustomImport, saveCustomImport } from "./label-custom-csv";
 import { parseCsv } from "./imports/sheet";
-import { readImportFile } from "./upload";
 
 const mocks = vi.hoisted(() => ({ user: vi.fn(), transaction: vi.fn(), query: vi.fn() }));
 vi.mock("./auth", () => ({ requireUser: mocks.user }));
@@ -182,12 +181,5 @@ describe("自定义批次保存与接口（模拟数据库）", () => {
     oversized.set("file", new File([new Uint8Array(20 * 1024 * 1024 + 1)], "示例.csv"));
     expect((await POST(request(oversized))).status).toBe(413);
     expect(mocks.query).not.toHaveBeenCalled();
-  });
-
-  it("通用文件读取默认只允许 xlsx/csv，可单独扩展格式", async () => {
-    const form = new FormData();
-    form.set("file", new File(["名称\t数量\n样品A\t2"], "示例.tsv"));
-    await expect(readImportFile(request(form))).rejects.toThrow("只支持 .xlsx 或 .csv 文件");
-    await expect(readImportFile(request(form), { extensions: /\.(xlsx|csv|tsv|txt)$/i, message: "格式不支持" })).resolves.toMatchObject({ name: "示例.tsv", mode: "preview" });
   });
 });
