@@ -37,21 +37,21 @@ def test_epl_payload_size_and_polarity():
     expected_len = 92 * 236
     payload = job[start:start + expected_len]
     assert len(payload) == expected_len
-    # 默认全白底：PIL mode 1 全为 1，经过取反后应为 0x00（无墨）
-    assert payload == b"\x00" * expected_len
+    # 默认白底：PIL mode 1 全为 1（0xFF，不加热留白），与 TSPL 一致
+    assert payload == b"\xff" * expected_len
     # 校验紧跟 \r\nP1\r\n
     assert job[start + expected_len:start + expected_len + 6] == b"\r\nP1\r\n"
 
 
 def test_epl_invert():
     img = _postek_blank()
-    # invert=True 时 PIL 的 1 保持为 0xFF（全黑）
+    # invert=True 时取反变为 0x00（黑底反白）
     job = epl.build_job([img], copies=1, profile=profiles.POSTEK_30x20_EPL, invert=True)
     marker = b"GW0,0,92,236,"
     start = job.index(marker) + len(marker)
     expected_len = 92 * 236
     payload = job[start:start + expected_len]
-    assert payload == b"\xff" * expected_len
+    assert payload == b"\x00" * expected_len
 
 
 def test_epl_multiple_images():

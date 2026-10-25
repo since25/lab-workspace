@@ -26,20 +26,20 @@ def _bitmap_payload(img: Image.Image, profile: LabelProfile, invert: bool) -> by
     if len(data) != expected_len:
         raise ValueError("位图字节数异常：期望 %d，实际 %d" % (expected_len, len(data)))
 
-    # EPL 规则：1=黑，0=白。PIL mode '1' 默认 0=黑，1=白，因此默认需取反
-    # 若 invert=True，则保持原样不反转
-    if not invert:
-        data = bytes(b ^ 0xFF for b in data)
-
-    # 处理最后字节填充位（EPL 中填充位必须为 0，防止右侧打出黑条）
+    # POSTEK C168 等热敏/热转印设备位图点阵极性：0=加热点墨（黑），1=不加热留白（白）。
+    # 与 TSPL BITMAP 规范一致，PIL mode '1'（1=白背景，0=黑文字）直接输出即为白底黑字。
+    # 填充位必须置为 1（白色背景，防止右侧打出黑条）。默认 invert=False 不反转。
     remainder = profile.media_w % 8
     if remainder != 0:
         padding_mask = (1 << (8 - remainder)) - 1
         data_list = bytearray(data)
         for row in range(profile.media_h):
             last_byte_idx = (row + 1) * bytes_per_row - 1
-            data_list[last_byte_idx] &= ~padding_mask
+            data_list[last_byte_idx] |= padding_mask
         data = bytes(data_list)
+
+    if invert:
+        data = bytes(b ^ 0xFF for b in data)
 
     return data
 
