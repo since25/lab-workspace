@@ -69,6 +69,8 @@ export default function LabelPrintPage() {
   const [batches, setBatches] = useState<CustomBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [editingCell, setEditingCell] = useState<{ id: number; key: string } | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const ids = useMemo(() => [...selected], [selected]);
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
@@ -177,6 +179,70 @@ export default function LabelPrintPage() {
     }
   }
 
+  async function handleDeleteBatch() {
+    if (!selectedBatchId) return;
+    const cur = batches.find((b) => b.id === selectedBatchId);
+    const name = cur?.batch_name || "当前批次";
+    if (!confirm(`确定要删除批次「${name}」及其全部数据吗？此操作不可恢复。`)) return;
+    setBusy("load");
+    setError("");
+    setNotice("");
+    try {
+      await api(`/api/v1/label-print/custom-batches?id=${selectedBatchId}`, { method: "DELETE" });
+      const remaining = batches.filter((b) => b.id !== selectedBatchId);
+      setBatches(remaining);
+      setSelected(new Set());
+      setPreview(null);
+      const nextBatch = remaining[0];
+      if (nextBatch) {
+        setSelectedBatchId(nextBatch.id);
+        await load("custom", 1, pageSize, "", nextBatch.id);
+      } else {
+        setSelectedBatchId(null);
+        setItems([]);
+        setFields([]);
+        setColumns([]);
+        setSelectedFields([]);
+        setTotal(0);
+      }
+      setNotice(`批次「${name}」已成功删除`);
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveCellEdit(itemId: number, key: string, nextVal: string) {
+    setEditingCell(null);
+    const target = items.find((it) => it.id === itemId);
+    if (!target) return;
+    const currentVal = String(target[key] ?? "");
+    if (currentVal === nextVal) return;
+
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === itemId
+          ? { ...it, [key]: nextVal, ...(columns[0]?.key === key ? { title: nextVal } : {}) }
+          : it
+      )
+    );
+    setPreview(null);
+
+    try {
+      await api(`/api/v1/label-print/custom-items/${itemId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ field: key, value: nextVal }),
+      });
+      setNotice(`单元格「${key}」已更新为：${nextVal || "（空）"}`);
+    } catch (err) {
+      setError(`保存单元格修改失败：${errText(err)}`);
+      setItems((prev) =>
+        prev.map((it) => (it.id === itemId ? { ...it, [key]: target[key] } : it))
+      );
+    }
+  }
+
   function toggleField(key: string) {
     setSelectedFields((old) => old.includes(key) ? old.filter((v) => v !== key) : [...old, key]);
     setPreview(null);
@@ -271,8 +337,8 @@ export default function LabelPrintPage() {
           <button onClick={() => void load(source, page + 1, pageSize)} disabled={busy !== "" || page >= pages}>下一页</button>
         </div>
         {source === "custom" && (
-          <div className="toolbar" style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}>
-            <label className="field">当前 CSV 批次
+          <div className="toolbar" style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10, alignItems: "center", gap: 10 }}>
+            <label className="field" style={{ margin: 0 }}>当前 CSV 批次
               <select
                 value={selectedBatchId ?? ""}
                 onChange={(e) => handleBatchChange(Number(e.target.value))}
@@ -290,7 +356,18 @@ export default function LabelPrintPage() {
               {uploading ? "上传中..." : "上传新 CSV"}
               <input type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => void handleFileUpload(e)} disabled={uploading} />
             </label>
-            <span className="muted">上传后自动固化入库，首列默认作为标签大字标题</span>
+            {!!selectedBatchId && (
+              <button
+                type="button"
+                className="button danger"
+                style={{ padding: "6px 12px", fontSize: "0.85rem", cursor: "pointer" }}
+                disabled={busy !== "" || uploading}
+                onClick={() => void handleDeleteBatch()}
+              >
+                删除当前批次
+              </button>
+            )}
+            <span className="muted">上传后自动固化入库 · 💡 双击任意单元格可在线修改内容</span>
           </div>
         )}
       </section>
@@ -308,15 +385,55 @@ export default function LabelPrintPage() {
               {items.map((item) => (
                 <tr key={item.id}>
                   <td><input type="checkbox" aria-label={`选择 ${String(item[columns[0]?.key] ?? item.id)}`} style={{ minHeight: 0 }} checked={selected.has(item.id)} onChange={() => toggleItem(item.id)} /></td>
-                  {columns.map((c, idx) => (
-                    <td
-                      key={c.key}
-                      className={c.key.includes("code") ? "mono" : (source !== "custom" && idx === 0 ? "text-col" : "")}
-                      style={{ whiteSpace: "nowrap" }}
-                    >
-                      {value(item, c.key)}
-                    </td>
-                  ))}
+                  {columns.map((c, idx) => {
+                    const isEditing = source === "custom" && editingCell?.id === item.id && editingCell?.key === c.key;
+                    return (
+                      <td
+                        key={c.key}
+                        className={c.key.includes("code") ? "mono" : (source !== "custom" && idx === 0 ? "text-col" : "")}
+                        style={{ whiteSpace: "nowrap", padding: isEditing ? "2px 4px" : undefined }}
+                      >
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editDraft}
+                            style={{
+                              padding: "3px 6px",
+                              fontSize: 13,
+                              border: "1px solid var(--primary, #0066cc)",
+                              borderRadius: 3,
+                              outline: "none",
+                              minWidth: 80,
+                              background: "var(--surface, #fff)",
+                            }}
+                            onChange={(e) => setEditDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveCellEdit(item.id, c.key, editDraft);
+                              } else if (e.key === "Escape") {
+                                setEditingCell(null);
+                              }
+                            }}
+                            onBlur={() => {
+                              void saveCellEdit(item.id, c.key, editDraft);
+                            }}
+                          />
+                        ) : (
+                          <span
+                            title={source === "custom" ? "双击修改内容" : undefined}
+                            onDoubleClick={source === "custom" ? () => {
+                              setEditingCell({ id: item.id, key: c.key });
+                              setEditDraft(String(item[c.key] ?? ""));
+                            } : undefined}
+                            style={source === "custom" ? { cursor: "cell", display: "inline-block", minWidth: 20 } : undefined}
+                          >
+                            {value(item, c.key)}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
               {!items.length && <tr><td colSpan={columns.length + 1} className="muted">没有符合条件的可打印记录</td></tr>}

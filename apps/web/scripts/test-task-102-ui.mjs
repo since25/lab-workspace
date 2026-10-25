@@ -51,6 +51,13 @@ try {
     const req = route.request();
     const url = new URL(req.url());
     if (url.pathname.endsWith('/custom-batches')) {
+      if (req.method() === 'DELETE') {
+        const id = Number(url.searchParams.get('id'));
+        const idx = customBatches.findIndex((b) => b.id === id);
+        if (idx >= 0) customBatches.splice(idx, 1);
+        customItems = customItems.filter((it) => it.batch_id !== id);
+        return route.fulfill({ json: { message: '批次已删除' } });
+      }
       if (req.method() === 'POST') {
         const body = req.postDataJSON();
         const headers = ['试剂名称', '规格型号', '品牌', '浓度', '体积', '存放位置', '入库日期', '保管人'];
@@ -62,11 +69,12 @@ try {
           created_at: '2026-10-24 14:40',
         };
         customBatches.unshift(newBatch);
-        customItems = [
+        const newItems = [
           { id: 601, batch_id: 2, 试剂名称: 'Anti-Flag mAb', 规格型号: '100 μg', 品牌: 'Sigma', 浓度: '1 mg/mL', 体积: '200 μL', 存放位置: '-20℃ 冰箱C-2', 入库日期: '2026-10-24', 保管人: '张三', title: 'Anti-Flag mAb' },
           { id: 602, batch_id: 2, 试剂名称: 'Tris-HCl 1M pH8.0', 规格型号: '500 mL', 品牌: '自配', 浓度: '1 M', 体积: '500 mL', 存放位置: '室温试剂架2层', 入库日期: '2026-10-20', 保管人: '李四', title: 'Tris-HCl 1M pH8.0' },
           { id: 603, batch_id: 2, 试剂名称: 'PCR Buffer 10x', 规格型号: '1 mL*5', 品牌: 'Takara', 浓度: '10x', 体积: '1 mL', 存放位置: '-20℃ 冰箱A-1', 入库日期: '2026-10-22', 保管人: '王五', title: 'PCR Buffer 10x' },
         ];
+        customItems = [...newItems, ...customItems];
         return route.fulfill({ status: 201, json: { batch: newBatch } });
       }
       return route.fulfill({ json: { batches: customBatches } });
@@ -82,6 +90,18 @@ try {
         return route.fulfill({ json: { source, items, total: items.length, page: 1, page_size: 20, fields, columns, batch_id: b.id } });
       }
       return route.fulfill({ json: { source, items: [], total: 0, page: 1, page_size: 20, fields: [], columns: [] } });
+    }
+    if (url.pathname.includes('/custom-items/')) {
+      const id = Number(url.pathname.split('/').pop());
+      const body = req.postDataJSON();
+      const item = customItems.find((x) => x.id === id);
+      if (item && body.field) {
+        item[body.field] = body.value;
+        const b = customBatches.find((x) => x.id === item.batch_id);
+        if (b && b.headers[0] === body.field) item.title = body.value;
+        return route.fulfill({ json: { item } });
+      }
+      return route.fulfill({ status: 404, json: { error: 'not found' } });
     }
     if (url.pathname.endsWith('/printers')) return route.fulfill({ json: { printers } });
     if (url.pathname.endsWith('/templates')) return route.fulfill({ json: { templates: [] } });
@@ -133,18 +153,36 @@ PCR Buffer 10x,1 mL*5,Takara,10x,1 mL,-20℃ 冰箱A-1,2026-10-22,王五`;
   }
   await page.screenshot({ path: join(evidence, '03-uploaded-new-batch.png'), fullPage: true });
 
-  // 5. 勾选记录并配置字段
+  // 5. 测试在线单元格编辑：双击 Anti-Flag mAb 的「浓度」单元格（原值 1 mg/mL），修改为 2.5 mg/mL
+  const cellTarget = page.locator('span', { hasText: '1 mg/mL' });
+  await cellTarget.dblclick();
+  const inputEditor = page.locator('table input[type="text"], table input:not([type="checkbox"])');
+  await inputEditor.fill('2.5 mg/mL');
+  await inputEditor.press('Enter');
+  await page.getByText('2.5 mg/mL', { exact: true }).waitFor();
+  await page.screenshot({ path: join(evidence, '04-cell-edited.png'), fullPage: true });
+
+  // 6. 勾选记录并配置字段
   await page.getByLabel('选择 Anti-Flag mAb', { exact: true }).check();
   await page.getByLabel('选择 Tris-HCl 1M pH8.0', { exact: true }).check();
   await page.getByText(/已选 2 条/).waitFor();
-  await page.screenshot({ path: join(evidence, '04-selected-items.png'), fullPage: true });
+  await page.screenshot({ path: join(evidence, '05-selected-items.png'), fullPage: true });
 
-  // 6. 点击「预览」，验证双列位图画布生成
+  // 7. 点击「预览」，验证双列位图画布生成
   await page.getByRole('button', { name: '预览' }).click();
   await page.getByText('共 2 个标签，1 张标签纸').waitFor();
   assert.equal(previewBody.source, 'custom');
   assert.deepEqual(previewBody.ids, [601, 602]);
-  await page.screenshot({ path: join(evidence, '05-preview-rendered.png'), fullPage: true });
+
+  // 8. 测试批次删除按钮：点击「删除当前批次」并确认
+  page.on('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+  await page.getByRole('button', { name: '删除当前批次' }).click();
+  await page.getByText(/批次.*已成功删除/).waitFor();
+  // 确认已回退到原第 1 批次
+  await page.getByText('pCDNA3.1-EGFP', { exact: true }).waitFor();
+  await page.screenshot({ path: join(evidence, '06-batch-deleted.png'), fullPage: true });
 
   console.log('TASK-102 端到端走查与截图全部顺利通过！');
 } finally {

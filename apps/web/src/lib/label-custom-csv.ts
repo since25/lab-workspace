@@ -102,3 +102,47 @@ export async function getCustomBatch(db: MaterialQuery, batchId: number, user: S
   );
   return row ?? null;
 }
+
+export async function deleteCustomBatch(db: MaterialQuery, batchId: number, user: SessionUser): Promise<boolean> {
+  const where = user.role === "admin" ? "id = $1" : "id = $1 AND user_id = $2";
+  const params = user.role === "admin" ? [batchId] : [batchId, user.id];
+  const [batch] = await db<{ id: number }>(`SELECT id FROM label_custom_batches WHERE ${where}`, params);
+  if (!batch) throw new HttpError(404, "批次不存在或无权删除");
+  await db(`DELETE FROM label_custom_batches WHERE id = $1`, [batchId]);
+  return true;
+}
+
+export async function updateCustomItemCell(
+  db: MaterialQuery,
+  itemId: number,
+  fieldKey: string,
+  newValue: string,
+  user: SessionUser
+): Promise<{ id: number; title: string; data: Record<string, string> }> {
+  const where = user.role === "admin" ? "ci.id = $1" : "ci.id = $1 AND ci.user_id = $2";
+  const params = user.role === "admin" ? [itemId] : [itemId, user.id];
+  const [item] = await db<{ id: number; batch_id: number; title: string; data: Record<string, string> }>(
+    `SELECT ci.id, ci.batch_id, ci.title, ci.data
+       FROM label_custom_items ci
+      WHERE ${where}`,
+    params
+  );
+  if (!item) throw new HttpError(404, "记录不存在或无权修改");
+  const [batch] = await db<{ headers: string[] }>(
+    `SELECT headers FROM label_custom_batches WHERE id = $1`,
+    [item.batch_id]
+  );
+  const headers = Array.isArray(batch?.headers) ? batch.headers : [];
+  const data = { ...(item.data || {}), [fieldKey]: newValue };
+  let title = item.title;
+  if (headers[0] && fieldKey === headers[0]) {
+    title = newValue.trim() || item.title;
+  }
+  await db(
+    `UPDATE label_custom_items
+        SET data = $1, title = $2
+      WHERE id = $3`,
+    [JSON.stringify(data), title, itemId]
+  );
+  return { id: itemId, title, data };
+}

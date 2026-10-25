@@ -2,7 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { query, withTransaction } from "@/lib/db";
 import { handle, HttpError, ok, readJson, str } from "@/lib/http";
 import { requireLabelPrinting } from "@/lib/label-print";
-import { listCustomBatches, parseAndSaveCustomCsv } from "@/lib/label-custom-csv";
+import { deleteCustomBatch, listCustomBatches, parseAndSaveCustomCsv } from "@/lib/label-custom-csv";
 
 export const GET = handle(async () => {
   const user = requireLabelPrinting(await requireUser());
@@ -22,4 +22,13 @@ export const POST = handle(async (req: Request) => {
   });
 
   return ok({ batch }, 201);
+});
+
+export const DELETE = handle(async (req: Request) => {
+  const user = requireLabelPrinting(await requireUser());
+  const url = new URL(req.url);
+  const id = Number(url.searchParams.get("id"));
+  if (!Number.isSafeInteger(id) || id <= 0) throw new HttpError(400, "缺少有效批次 id");
+  await deleteCustomBatch(query, id, user);
+  return ok({ message: "批次已删除" });
 });

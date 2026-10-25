@@ -107,6 +107,14 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/app.css') { res.setHeader('content-type', 'text/css'); res.end(await readFile(join(stage, 'app.css')).catch(() => '')); return; }
 
   if (url.pathname.startsWith('/api/v1/label-print/custom-batches')) {
+    if (req.method === 'DELETE') {
+      const id = Number(url.searchParams.get('id'));
+      const idx = customBatches.findIndex((b) => b.id === id);
+      if (idx >= 0) customBatches.splice(idx, 1);
+      customItems = customItems.filter((it) => it.batch_id !== id);
+      json(res, { message: '批次已删除' });
+      return;
+    }
     if (req.method === 'POST') {
       const input = await body(req);
       const csvText = String(input.csv_text || '');
@@ -131,6 +139,24 @@ const server = createServer(async (req, res) => {
       return;
     }
     json(res, { batches: customBatches });
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/v1/label-print/custom-items/')) {
+    const id = Number(url.pathname.split('/').pop());
+    const input = await body(req);
+    const item = customItems.find((it) => it.id === id);
+    if (item && input.field) {
+      item[input.field] = input.value;
+      const b = customBatches.find((x) => x.id === item.batch_id);
+      if (b && b.headers[0] === input.field) {
+        item.title = input.value;
+      }
+      json(res, { item });
+      return;
+    }
+    res.statusCode = 404;
+    json(res, { error: 'item not found' });
     return;
   }
 
