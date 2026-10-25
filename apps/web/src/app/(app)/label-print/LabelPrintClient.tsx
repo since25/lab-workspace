@@ -337,12 +337,24 @@ export default function LabelPrintPage() {
           <button onClick={() => void load(source, page + 1, pageSize)} disabled={busy !== "" || page >= pages}>下一页</button>
         </div>
         {source === "custom" && (
-          <div className="toolbar" style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10, alignItems: "center", gap: 10 }}>
-            <label className="field" style={{ margin: 0 }}>当前 CSV 批次
+          <div
+            className="toolbar"
+            style={{
+              borderTop: "1px solid var(--border)",
+              paddingTop: 12,
+              marginTop: 12,
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 0,
+            }}
+          >
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: "13px", color: "var(--muted)", whiteSpace: "nowrap" }}>当前 CSV 批次：</span>
               <select
                 value={selectedBatchId ?? ""}
                 onChange={(e) => handleBatchChange(Number(e.target.value))}
                 disabled={busy !== "" || uploading}
+                style={{ minWidth: 280, height: 34, padding: "0 10px", margin: 0, boxSizing: "border-box" }}
               >
                 {!batches.length && <option value="">暂无已上传批次</option>}
                 {batches.map((b) => (
@@ -351,8 +363,25 @@ export default function LabelPrintPage() {
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="primary button" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer", margin: 0, padding: "6px 12px", borderRadius: 4, background: "var(--primary, #0066cc)", color: "#fff", fontSize: "0.9rem" }}>
+            </div>
+            <label
+              className="primary button"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                height: 34,
+                padding: "0 14px",
+                margin: 0,
+                borderRadius: "var(--radius, 4px)",
+                background: "var(--primary, #0066cc)",
+                color: "#fff",
+                fontSize: "13px",
+                whiteSpace: "nowrap",
+                boxSizing: "border-box",
+              }}
+            >
               {uploading ? "上传中..." : "上传新 CSV"}
               <input type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => void handleFileUpload(e)} disabled={uploading} />
             </label>
@@ -360,14 +389,27 @@ export default function LabelPrintPage() {
               <button
                 type="button"
                 className="button danger"
-                style={{ padding: "6px 12px", fontSize: "0.85rem", cursor: "pointer" }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: 34,
+                  padding: "0 14px",
+                  margin: 0,
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxSizing: "border-box",
+                }}
                 disabled={busy !== "" || uploading}
                 onClick={() => void handleDeleteBatch()}
               >
                 删除当前批次
               </button>
             )}
-            <span className="muted">上传后自动固化入库 · 💡 双击任意单元格可在线修改内容</span>
+            <span className="muted" style={{ fontSize: "12px", marginLeft: 4, whiteSpace: "nowrap" }}>
+              上传后自动固化入库 · 💡 双击任意单元格可在线修改内容
+            </span>
           </div>
         )}
       </section>
