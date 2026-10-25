@@ -11,7 +11,7 @@ from datetime import date
 
 from flask import Flask, jsonify, render_template, request
 
-from labelprint import config, render, tspl
+from labelprint import config, epl, profiles, render, tspl
 from labelprint.model import LabelRow
 from labelprint.sources import tabular
 from labelprint.store import Store
@@ -28,23 +28,29 @@ def _send_raw(data: bytes, doc_name: str, printer_name=None) -> int:
 
 
 def _status_for(printer_name=None):
-    return _printer_status(printer_name) if printer_name else _printer_status()
+    if not printer_name:
+        return _printer_status()
+    try:
+        return _printer_status(printer_name)
+    except TypeError:
+        return _printer_status()
 
 
 def _send_for(data: bytes, doc_name: str, printer_name=None):
-    return _send_raw(data, doc_name, printer_name) if printer_name else _send_raw(data, doc_name)
+    if not printer_name:
+        return _send_raw(data, doc_name)
+    try:
+        return _send_raw(data, doc_name, printer_name)
+    except TypeError:
+        return _send_raw(data, doc_name)
 
 
 def _resolve_printer_name(printer_id):
     ident = (printer_id or "").strip()
     if not ident:
         return None
-    for item in config.configured_printers():
-        if item["id"] == ident:
-            return item["printer_name"]
-    # 工作台管理员可以直接把 Windows 打印队列名作为 printer_key；未列入环境目录
-    # 时保留这个兼容路径，目标机仍会由 win32print 给出明确的设备错误。
-    return ident
+    p_cfg = config.get_printer_config(ident)
+    return p_cfg.get("printer_name") or ident
 
 
 def _rows_from_json(payload):
@@ -74,13 +80,13 @@ def _parse_style(payload, template):
     return render.custom_style(template, raw)
 
 
-def _render_images(rows, date_str, layout, template="name-detail", style=None):
+def _render_images(rows, date_str, layout, template="name-detail", style=None, profile=None):
     """按布局与模板生成位图；two-up 按输入顺序填左、右列。"""
     if layout == "two-up":
         images = []
         for index in range(0, len(rows), 2):
             try:
-                images.append(render.render_two_up(rows[index:index + 2], date_str, template, style))
+                images.append(render.render_two_up(rows[index:index + 2], date_str, template, style, profile=profile))
             except render.LabelTooLongError as exc:
                 raise render.LabelTooLongError(f"第 {index + 1} 个有效行：{exc}") from exc
         return images
@@ -128,7 +134,10 @@ def create_app():
 
     @app.get("/api/media")
     def api_media():
-        return jsonify(render.MEDIA)
+        printer_id = (request.args.get("printer_id") or "").strip()
+        p_cfg = config.get_printer_config(printer_id)
+        prof = profiles.get_profile(p_cfg.get("profile"))
+        return jsonify(prof.to_media_dict())
 
     @app.get("/api/printers")
     def api_printers():
@@ -138,7 +147,14 @@ def create_app():
                 state = _status_for(item["printer_name"])
             except Exception as exc:
                 state = {"ready": False, "reason": "无法查询打印机：%s" % exc, "jobs": 0, "notes": ""}
-            printers.append({"id": item["id"], "name": item["name"], "printer_name": item["printer_name"], **state})
+            printers.append({
+                "id": item["id"],
+                "name": item["name"],
+                "printer_name": item["printer_name"],
+                "command_set": item.get("command_set", "tspl"),
+                "profile": item.get("profile", "brady-30x15"),
+                **state
+            })
         return jsonify({"printers": printers})
 
     @app.post("/api/parse")
@@ -179,10 +195,13 @@ def create_app():
         # 就能绕开上传时的行数上限，一次渲染一千张图
         if len(rows) > config.MAX_ROWS:
             return jsonify({"error": "行数 %d 超过上限 %d" % (len(rows), config.MAX_ROWS)}), 400
+        printer_id = (payload.get("printer_id") or "").strip()
+        p_cfg = config.get_printer_config(printer_id)
+        prof = profiles.get_profile(p_cfg.get("profile"))
         today = date.today().strftime("%Y-%m-%d")
         images = []
         try:
-            for image in _render_images(rows, today, layout, template, style):
+            for image in _render_images(rows, today, layout, template, style, profile=prof):
                 buf = io.BytesIO()
                 image.save(buf, format="PNG")
                 images.append(base64.b64encode(buf.getvalue()).decode("ascii"))
@@ -190,7 +209,14 @@ def create_app():
             # 异常消息本身已经是可直接展示的中文，只是补上是第几行——两行同名
             # 又都超长时，光看消息本身分不出是哪一行
             return jsonify({"error": str(exc)}), 400
-        return jsonify({"images": images, "count": len(rows), "media_count": len(images), "layout": layout, "template": template, "media": render.MEDIA})
+        return jsonify({
+            "images": images,
+            "count": len(rows),
+            "media_count": len(images),
+            "layout": layout,
+            "template": template,
+            "media": prof.to_media_dict(),
+        })
 
     @app.post("/api/print")
     def api_print():
@@ -208,6 +234,9 @@ def create_app():
             return jsonify({"error": "模板样式不合法：%s" % exc}), 400
         operator = str(payload.get("operator", "")).strip()
         printer_id = str(payload.get("printer_id", "")).strip()
+        p_cfg = config.get_printer_config(printer_id)
+        prof = profiles.get_profile(p_cfg.get("profile"))
+        printer_queue = p_cfg.get("printer_name") if printer_id else None
         client_ip = request.remote_addr or ""
         try:
             copies = int(payload.get("copies", 1))
@@ -224,7 +253,7 @@ def create_app():
         # 打印前必须查打印机状态；查询本身失败（如本机没装 pywin32）也要给中文提示，
         # 不能让异常一路崩到 500 页面
         try:
-            st = _status_for(_resolve_printer_name(printer_id))
+            st = _status_for(printer_queue)
         except Exception as exc:
             return jsonify({"error": "无法查询打印机：%s" % exc}), 409
         if not st["ready"]:
@@ -233,13 +262,17 @@ def create_app():
         today = date.today().strftime("%Y-%m-%d")
         images = []
         try:
-            images = _render_images(rows, today, layout, template, style)
+            images = _render_images(rows, today, layout, template, style, profile=prof)
         except render.LabelTooLongError as exc:
             return jsonify({"error": str(exc)}), 400
-        job = tspl.build_job(images, copies=copies, invert=config.INVERT)
+
+        if p_cfg.get("command_set") == "epl":
+            job = epl.build_job(images, copies=copies, profile=prof, invert=config.INVERT)
+        else:
+            job = tspl.build_job(images, copies=copies, invert=config.INVERT)
 
         try:
-            _send_for(job, "labelprint", _resolve_printer_name(printer_id))
+            _send_for(job, "labelprint", printer_queue)
         except Exception as exc:
             # 记历史失败（SQLite 被并发写锁住、磁盘满等）不能掩盖真正的错误
             # 原因——用户需要看到的是"送打印失败：xxx"，不是历史记录的异常
@@ -247,6 +280,7 @@ def create_app():
                 store.log(rows, copies, operator, client_ip, ok=False, err=str(exc))
             except Exception:
                 pass
+            return jsonify({"error": "送打印失败：%s" % exc}), 500
             return jsonify({"error": "送打印失败：%s" % exc}), 500
 
         # 数据已经真的发给打印机了，这一步之后绝不能再让未捕获异常把请求

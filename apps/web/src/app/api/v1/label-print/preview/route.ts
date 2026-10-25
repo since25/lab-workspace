@@ -22,9 +22,11 @@ export const POST = handle(async (req: Request) => {
   if (source === "cells" && body.by_tube_count === true) {
     items = expandByTubeCount(items);
   }
+  const printerId = typeof body.printer_id === "string" ? body.printer_id.trim() : "";
   const result = await callLabelPrint("/api/preview", {
     rows: labelRows(items, source, fields, resolved.prefixes), layout: "two-up", template: resolved.template,
     ...(resolved.style ? { style: resolved.style } : {}),
+    ...(printerId ? { printer_id: printerId } : {}),
   });
   return ok({ ...result, source, template: resolved.template, template_id: resolved.templateId, template_label: resolved.label, fields, count: items.length });
 });

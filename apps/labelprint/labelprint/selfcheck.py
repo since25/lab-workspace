@@ -134,7 +134,7 @@ def check_render():
 
 def check_tspl():
     from labelprint.model import LabelRow
-    from labelprint import render, tspl
+    from labelprint import epl, profiles, render, tspl
     img = render.render_label(LabelRow(sample="S1"), "2026-01-01")
     job = tspl.build_job([img], copies=1)
     head = job[:200].decode("latin-1")
@@ -142,7 +142,17 @@ def check_tspl():
     assert b"BITMAP 0,0,88,178,0," in job, "缺 BITMAP 指令"
     assert b"PRINT 1,1" in job, "缺 PRINT 指令"
     assert b"GAP" not in job, "不应出现 GAP 指令"
-    return "指令 %d 字节，结构正确" % len(job)
+
+    # EPL 指令集校验（POSTEK C168/300s）
+    img_postek = render.render_two_up([LabelRow(sample="S1")], "2026-01-01", profile=profiles.POSTEK_30x20_EPL)
+    job_epl = epl.build_job([img_postek], copies=1, profile=profiles.POSTEK_30x20_EPL)
+    assert b"N\r\n" in job_epl, "缺 EPL N 指令"
+    assert b"q736\r\n" in job_epl, "缺 EPL q736 指令"
+    assert b"Q236,24\r\n" in job_epl, "缺 EPL Q236,24 指令"
+    assert b"GW0,0,92,236," in job_epl, "缺 EPL GW 指令"
+    assert b"P1\r\n" in job_epl, "缺 EPL P1 指令"
+
+    return "TSPL 指令 %d 字节、EPL 指令 %d 字节，双后端校验通过" % (len(job), len(job_epl))
 
 
 def _run_guard(action):

@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from labelprint import fonts
 from labelprint.model import LabelRow
+from labelprint.profiles import BRADY_30x15_TSPL, LabelProfile
 
 
 class LabelTooLongError(ValueError):
@@ -314,18 +315,23 @@ def _measure(lines: list[str], font, gap: int = 0) -> int:
     return len(lines) * _line_height(font) + (len(lines) - 1) * gap
 
 
-def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE, style: dict | None = None) -> Image.Image:
-    """渲染 30 mm 双列纸的一格。
+def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE,
+                         style: dict | None = None, profile: LabelProfile | None = None) -> Image.Image:
+    """渲染双列纸的一格。
 
     名称最多两行、字段最多两行，按可用高度整体垂直居中；先按大字号排版，
     放不下再逐步缩字号，避免短名称被顶在上边、下面空掉一大片。
     """
+    prof = profile or BRADY_30x15_TSPL
     style = style or TEMPLATES.get(template, TEMPLATES[DEFAULT_TEMPLATE])
     line_gap = style.get("line_gap", SLOT_LINE_GAP)
-    img = Image.new("1", (SLOT_W, LABEL_H), 1)
+    img = Image.new("1", (prof.slot_w, prof.slot_h), 1)
     draw = ImageDraw.Draw(img)
-    usable_w = SLOT_W - 2 * SLOT_MARGIN_X
-    usable_h = LABEL_H - SLOT_MARGIN_TOP - SLOT_MARGIN_BOTTOM
+    margin_x = prof.margins[0]
+    margin_top = prof.margins[1]
+    margin_bottom = prof.margins[2] if len(prof.margins) > 2 else prof.margins[1]
+    usable_w = prof.slot_w - 2 * margin_x
+    usable_h = prof.slot_h - margin_top - margin_bottom
     name = row.sample.strip()
 
     details: list[str] = []
@@ -366,7 +372,7 @@ def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE, style:
         name_lines = _wrap_lines(name, name_font, usable_w, SLOT_MAX_NAME_LINES)
         if name_lines is None:
             raise LabelTooLongError(
-                f'样品名「{name}」太长，排不进 30 mm 标签（当前 {len(name)} 字符），请缩短后重试'
+                f'样品名「{name}」太长，排不进标签（当前 {len(name)} 字符），请缩短后重试'
             )
         font = _regular(style["detail_min"])
         wrapped = []
@@ -385,27 +391,28 @@ def _render_compact_slot(row: LabelRow, template: str = DEFAULT_TEMPLATE, style:
         chosen = (name_lines, name_font, wrapped, font, height)
 
     name_lines, name_font, wrapped, detail_font, height = chosen
-    y = SLOT_MARGIN_TOP + max(0, (usable_h - height) // 2)
+    y = margin_top + max(0, (usable_h - height) // 2)
     for line in name_lines:
-        draw.text((SLOT_MARGIN_X, y), line, font=name_font, fill=0)
+        draw.text((margin_x, y), line, font=name_font, fill=0)
         y += _line_height(name_font)
     if wrapped:
         y += SLOT_NAME_GAP
         for lines in wrapped:
             for line in lines:
-                draw.text((SLOT_MARGIN_X, y), line, font=detail_font, fill=0)
+                draw.text((margin_x, y), line, font=detail_font, fill=0)
                 y += _line_height(detail_font)
             y += line_gap
     return img
 
 
 def render_two_up(rows: list[LabelRow], date_str: str, template: str = DEFAULT_TEMPLATE,
-                  style: dict | None = None) -> Image.Image:
+                  style: dict | None = None, profile: LabelProfile | None = None) -> Image.Image:
     """把最多两张标签排在同一张双列载体上，奇数时右列保持空白。"""
     if not 1 <= len(rows) <= 2:
         raise ValueError("双列标签一次需要 1 至 2 行")
-    media = Image.new("1", (LABEL_W, LABEL_H), 1)
+    prof = profile or BRADY_30x15_TSPL
+    media = Image.new("1", (prof.media_w, prof.media_h), 1)
     for index, row in enumerate(rows):
-        x = 0 if index == 0 else SLOT_W + TWO_UP_GAP
-        media.paste(_render_compact_slot(row, template, style), (x, 0))
+        x = 0 if index == 0 else prof.slot_w + prof.slot_gap
+        media.paste(_render_compact_slot(row, template, style, prof), (x, 0))
     return media

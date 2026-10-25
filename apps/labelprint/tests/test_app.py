@@ -564,3 +564,58 @@ def test_preview_and_print_reject_bad_style(client):
                                     "style": {"name_pt": 200}})
         assert r.status_code == 400
         assert "样式" in json.loads(r.data)["error"]
+
+
+def test_printers_endpoint_lists_both_brady_and_postek(client, monkeypatch):
+    monkeypatch.setattr(app_module, "_status_for", lambda name=None: {"ready": True, "reason": "", "jobs": 0})
+    r = client.get("/api/printers")
+    assert r.status_code == 200
+    printers = json.loads(r.data)["printers"]
+    assert len(printers) >= 2
+    keys = {p["id"]: p for p in printers}
+    assert "brady-bbp12" in keys
+    assert "postek-c168" in keys
+    assert keys["brady-bbp12"]["command_set"] == "tspl"
+    assert keys["postek-c168"]["command_set"] == "epl"
+
+
+def test_postek_media_and_preview(client):
+    r_media = client.get("/api/media?printer_id=postek-c168")
+    assert r_media.status_code == 200
+    media = json.loads(r_media.data)
+    assert media["command_set"] == "epl"
+    assert media["width_mm"] == 62.0
+    assert media["height_mm"] == 20.0
+
+    r_prev = client.post("/api/preview", json={
+        "layout": "two-up",
+        "printer_id": "postek-c168",
+        "rows": [{"sample": "POSTEK_S1"}]
+    })
+    assert r_prev.status_code == 200
+    body = json.loads(r_prev.data)
+    assert body["media"]["command_set"] == "epl"
+    assert body["media"]["width_mm"] == 62.0
+
+
+def test_postek_print_generates_epl_stream(client, monkeypatch):
+    monkeypatch.setattr(app_module, "_status_for", lambda name=None: {"ready": True, "reason": "", "jobs": 0})
+    captured = {}
+    def fake_send(data, doc, name=None):
+        captured["data"] = data
+        captured["name"] = name
+        return 101
+
+    monkeypatch.setattr(app_module, "_send_for", fake_send)
+    r = client.post("/api/print", json={
+        "layout": "two-up",
+        "printer_id": "postek-c168",
+        "rows": [{"sample": "POSTEK_S1"}],
+        "copies": 2,
+    })
+    assert r.status_code == 200
+    assert captured["name"] == "POSTEK C168/300s"
+    data = captured["data"]
+    assert b"N\r\nq736\r\nQ236,24\r\n" in data
+    assert b"GW0,0,92,236," in data
+    assert b"P2\r\n" in data

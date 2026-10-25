@@ -9,11 +9,11 @@ type Field = { key: string; label: string };
 type Printer = { id: number; printer_key: string; name: string; enabled: boolean; is_default: boolean; ready?: boolean; reason?: string; jobs?: number; notes?: string };
 type Preview = { images: string[]; count: number; media_count?: number; fields: string[]; template?: string; template_label?: string; media?: Media };
 type CustomTemplate = { id: number; name: string; base_template: string; fields: { key: string; prefix: string }[] };
-type Media = { dpi: number; width_mm: number; height_mm: number; slot_width_mm: number; slot_height_mm: number; columns: number };
+type Media = { dpi: number; width_mm: number; height_mm: number; slot_width_mm: number; slot_height_mm: number; columns: number; command_set?: string };
 type CustomBatch = { id: number; batch_name: string; row_count: number; created_at: string };
 
 // 纸张尺寸兜底值：标签服务不可用或还没返回时，仍能显示 30×15 双列的标注。
-const FALLBACK_MEDIA: Media = { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2 };
+const FALLBACK_MEDIA: Media = { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2, command_set: "tspl" };
 
 const SOURCES: { key: SourceKey; label: string; hint: string }[] = [
   { key: "materials", label: "部门物料", hint: "采购入库的物料与试剂" },
@@ -121,9 +121,14 @@ export default function LabelPrintPage() {
       setPage(itemData.page);
       setPageSize(itemData.page_size);
       setPrinters(printerData.printers);
-      api<Media>("/api/v1/label-print/media").then(setMedia, () => {});
-      if (!printerId || !printerData.printers.some((p) => String(p.id) === printerId)) {
-        setPrinterId(String(printerData.printers.find((p) => p.is_default)?.id ?? printerData.printers[0]?.id ?? ""));
+      const curPrinter = (!printerId || !printerData.printers.some((p) => String(p.id) === printerId))
+        ? (printerData.printers.find((p) => p.is_default) ?? printerData.printers[0])
+        : printerData.printers.find((p) => String(p.id) === printerId);
+      if (curPrinter) {
+        setPrinterId(String(curPrinter.id));
+        api<Media>(`/api/v1/label-print/media?printer_id=${encodeURIComponent(curPrinter.printer_key)}`).then(setMedia, () => {});
+      } else {
+        api<Media>("/api/v1/label-print/media").then(setMedia, () => {});
       }
       setError("");
     } catch (e) { setError(errText(e)); }
@@ -279,10 +284,18 @@ export default function LabelPrintPage() {
     if (!ids.length) return setError("请先勾选要打印的记录");
     if (!selectedFields.length) return setError("请至少选择一个打印字段");
     setBusy("preview");
+    const activePrinter = printers.find((p) => String(p.id) === printerId);
     try {
       setPreview(await api<Preview>("/api/v1/label-print/preview", {
         method: "POST",
-        body: JSON.stringify({ source, ids, fields: selectedFields, by_tube_count: byTubeCount, ...templateBody() }),
+        body: JSON.stringify({
+          source,
+          ids,
+          fields: selectedFields,
+          by_tube_count: byTubeCount,
+          printer_id: activePrinter?.printer_key,
+          ...templateBody(),
+        }),
       }));
     } catch (e) { setError(errText(e)); }
     finally { setBusy(""); }
@@ -307,8 +320,10 @@ export default function LabelPrintPage() {
   }
 
   const value = (item: Item, key: string) => String(item[key] ?? "") || "—";
-  const slotSize = `${Math.round(media.slot_width_mm)} × ${Math.round(media.slot_height_mm)}`;
-  const sheetSize = `${media.width_mm} × ${media.height_mm} mm`;
+  const curMedia = preview?.media ?? media;
+  const slotSize = `${Math.round(curMedia.slot_width_mm)} × ${Math.round(curMedia.slot_height_mm)}`;
+  const cmdSet = (curMedia.command_set || "").toUpperCase();
+  const sheetSize = `${curMedia.width_mm} × ${curMedia.height_mm} mm${cmdSet ? ` (${cmdSet})` : ""}`;
 
   return (
     <>
@@ -539,7 +554,17 @@ export default function LabelPrintPage() {
             <input type="number" min={1} max={20} step={1} style={{ width: 80 }} value={copies} onChange={(e) => setCopies(Math.min(20, Math.max(1, Number(e.target.value) || 1)))} />
           </label>
           <label className="field">打印机
-            <select value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
+            <select
+              value={printerId}
+              onChange={(e) => {
+                const nextId = e.target.value;
+                setPrinterId(nextId);
+                setPreview(null);
+                const p = printers.find((x) => String(x.id) === nextId);
+                const qKey = p ? `?printer_id=${encodeURIComponent(p.printer_key)}` : "";
+                api<Media>(`/api/v1/label-print/media${qKey}`).then(setMedia, () => {});
+              }}
+            >
               <option value="">请选择打印机</option>
               {printers.map((printer) => <option key={printer.id} value={printer.id} disabled={!printer.enabled || printer.ready === false}>{printer.name}{printer.ready === false ? `（不可用：${printer.reason || "状态未知"}）` : ""}</option>)}
             </select>

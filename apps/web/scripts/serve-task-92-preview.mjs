@@ -82,6 +82,7 @@ const itemsBySource = {
 
 const printers = [
   { id: 1, printer_key: 'brady-bbp12', name: 'Brady BBP12', enabled: true, is_default: true, ready: true, jobs: 0 },
+  { id: 2, printer_key: 'postek-c168', name: 'POSTEK C168/300s', enabled: true, is_default: false, ready: true, jobs: 0 },
 ];
 
 const customBatches = [
@@ -184,7 +185,15 @@ const server = createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/api/v1/label-print/printers')) { json(res, { printers }); return; }
   if (url.pathname.startsWith('/api/v1/label-print/templates')) { json(res, { templates: [] }); return; }
-  if (url.pathname.startsWith('/api/v1/label-print/media')) { json(res, { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2 }); return; }
+  if (url.pathname.startsWith('/api/v1/label-print/media')) {
+    const pKey = url.searchParams.get('printer_id');
+    if (pKey === 'postek-c168') {
+      json(res, { dpi: 300, width_mm: 62.0, height_mm: 20.0, slot_width_mm: 30.0, slot_height_mm: 20.0, columns: 2, command_set: 'epl', media_w: 736, media_h: 236 });
+    } else {
+      json(res, { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2, command_set: 'tspl', media_w: 703, media_h: 178 });
+    }
+    return;
+  }
   if (url.pathname.startsWith('/api/v1/label-print/preview')) {
     const input = await body(req);
     let count = (input.ids || []).length;
@@ -196,12 +205,17 @@ const server = createServer(async (req, res) => {
     }
     const mediaCount = Math.ceil(count / 2);
     const images = Array.from({ length: mediaCount }, () => sampleLabel);
-    json(res, { images, count, media_count: mediaCount, fields: input.fields || [], template: input.template, layout: 'two-up' });
+    const pKey = input.printer_id;
+    const media = pKey === 'postek-c168'
+      ? { dpi: 300, width_mm: 62.0, height_mm: 20.0, slot_width_mm: 30.0, slot_height_mm: 20.0, columns: 2, command_set: 'epl' }
+      : { dpi: 300, width_mm: 59.5, height_mm: 15.1, slot_width_mm: 29.7, slot_height_mm: 15.1, columns: 2, command_set: 'tspl' };
+    json(res, { images, count, media_count: mediaCount, fields: input.fields || [], template: input.template, layout: 'two-up', media });
     return;
   }
   if (url.pathname.startsWith('/api/v1/label-print/print')) {
     const input = await body(req);
-    json(res, { message: '模拟打印作业已成功提交', sent: (input.ids || []).length, printer: 'Brady BBP12' });
+    const p = printers.find((x) => x.id === input.printer_id) || printers[0];
+    json(res, { message: `模拟打印作业已成功提交（${p.printer_key === 'postek-c168' ? 'EPL' : 'TSPL'}）`, sent: (input.ids || []).length, printer: p.name });
     return;
   }
 
